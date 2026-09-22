@@ -1,0 +1,4 @@
+/build*/
+/nimcache/
+__pycache__/
+.DS_Store
