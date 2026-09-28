@@ -1,0 +1,24 @@
+# zal-tls
+
+TLS 1.3 for Nimony, built on zal-net and AWS-LC.
+Includes certificate verification, mTLS, resumption, ECH, QUIC handshake mode
+and Linux kTLS adapters.
+
+```nim
+import std/syncio
+import zal_net/rt
+import zal_tls as tls
+
+proc main() {.passive.} =
+  try:
+    let config = tls.newClientConfig(tls.systemTrust())
+    let stream = tls.connect(config, "example.com", 443, deadline=afterMs(5000))
+    defer: stream.close()
+  except ErrorCode as error:
+    echo error
+
+discard runMain(main())
+```
+
+Use the compiler pinned by zal-net, `--mm:atomicArc` and `-d:useMimalloc`.
+See [build and ownership](docs/usage.md). MIT license.

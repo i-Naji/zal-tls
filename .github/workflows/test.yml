@@ -1,0 +1,45 @@
+name: tests
+on: [workflow_dispatch]
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Network revision
+        id: net
+        shell: bash
+        run: echo "sha=$(cat ci/zal-net.ref)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: i-Naji/zal-net
+          path: build/net
+          ref: ${{ steps.net.outputs.sha }}
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: '2.2.10'
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        with:
+          msystem: UCRT64
+          install: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja perl
+      - name: Windows tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '"C:\msys64\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append'
+      - name: Build and test
+        if: runner.os != 'Windows'
+        run: |
+          build/net/scripts/nimony-setup.sh "$PWD/build/toolchain"
+          scripts/awslc-setup.sh "$PWD/build/aws-lc"
+          NIMONY=build/toolchain/bin/nimony ZAL_NET_DIR=build/net AWSLC=build/aws-lc/install SUITE=full PRUNE_CASE_CACHES=1 scripts/test.sh
+      - name: Build and test on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          build/net/scripts/nimony-setup.sh "$PWD/build/toolchain"
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/awslc-setup.ps1 -Directory build/aws-lc
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1 -Suite full -Nimony build/toolchain/bin/nimony.exe -ZalNetDir build/net -AwsLc build/aws-lc/install
