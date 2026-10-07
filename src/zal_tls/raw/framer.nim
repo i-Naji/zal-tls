@@ -199,7 +199,7 @@ proc tlsCloseSink(d: DirectionPtr) =
   sinkState[nil TlsTrafficPtr](d)[] = nil
   drop(t)
 
-var tlsFramer* = FramerObj(geometry: TlsGeometry, open: tlsOpen, atBoundary: tlsBoundary, sourceEnded: tlsEnded,
+let tlsFramer* = FramerObj(geometry: TlsGeometry, open: tlsOpen, atBoundary: tlsBoundary, sourceEnded: tlsEnded,
                            seal: tlsSeal, closeSource: tlsCloseSource, closeSink: tlsCloseSink,
                            finish: tlsFinish)
   ## TLS 1.3 records, both ways.
@@ -342,7 +342,7 @@ proc kFinish(c: Conn; d: DirectionPtr): bool =
     d.preLen = d.preLen + 1
   result = true
 
-var ktlsFramer* = FramerObj(geometry: KtlsGeometry, open: kOpen, atBoundary: tlsBoundary, sourceEnded: tlsEnded,
+let ktlsFramer* = FramerObj(geometry: KtlsGeometry, open: kOpen, atBoundary: tlsBoundary, sourceEnded: tlsEnded,
                             seal: kSeal, closeSource: tlsCloseSource, closeSink: tlsCloseSink,
                             finish: kFinish, readFailed: kReadFailed, writePrefix: kWritePrefix)
   ## A TLS side whose records the kernel seals and opens (Linux kTLS).
