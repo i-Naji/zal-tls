@@ -1,3 +1,4 @@
+{.feature: "assumeSync".}
 ## Writer release remains visible even before a contender registers its wait.
 import std/[assertions, atomics, syncio]
 import zal_net/rt

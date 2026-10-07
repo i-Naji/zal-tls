@@ -1,3 +1,4 @@
+{.feature: "assumeSync".}
 ## The TLS framer without sockets: a relay direction's buffer fed with a
 ## client's records, opened by the framer; spans sealed by the framer read
 ## back by the client; a key update request answered from the prefix; a

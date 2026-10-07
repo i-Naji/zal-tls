@@ -1,3 +1,4 @@
+{.feature: "assumeSync".}
 ## kTLS (Linux): two TLS streams over loopback hand their keys to the
 ## kernel; plaintext written on one side is read on the other; a key update
 ## each way (a handshake record, then new kernel keys); close_notify as an

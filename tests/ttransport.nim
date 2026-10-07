@@ -1,3 +1,4 @@
+{.feature: "assumeSync".}
 ## TLS on a user transport with deliberately fragmented reads and partial writes.
 ## Borrowing leaves the underlying owner open; transfer closes it exactly once.
 import std/[syncio, assertions]

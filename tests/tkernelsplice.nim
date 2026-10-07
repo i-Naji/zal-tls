@@ -1,3 +1,4 @@
+{.feature: "assumeSync".}
 ## Opt-in TCP -> kTLS splice: verified payload, close_notify, control rekey,
 ## cancellation/deadline rejection, and forced output-refusal recovery.
 import std/[assertions, syncio]

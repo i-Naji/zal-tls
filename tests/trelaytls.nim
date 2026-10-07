@@ -1,3 +1,4 @@
+{.feature: "assumeSync".}
 import zal_net/net/endpointdial
 ## TLS on zal-net's framed relay, over real sockets: a terminator (TLS
 ## in, plain out to an echo server) and an originator (plain in, TLS out to

@@ -1,3 +1,4 @@
+{.feature: "assumeSync".}
 ## Friendly configuration/connection lifetimes, custom adapters and close drain.
 import std/[assertions, syncio]
 import zal_net/[rt, errors], zal_net/rt/[sync, cancel]

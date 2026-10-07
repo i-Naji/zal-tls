@@ -1,3 +1,4 @@
+{.feature: "assumeSync".}
 ## TlsStream over real TCP: a TLS echo server on the loops, a client that
 ## sends 1 MiB from one task and reads it back in another, close_notify both
 ## ways; a handshake that fails reports the alert; `copy` from zal-net

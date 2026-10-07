@@ -1,3 +1,4 @@
+{.feature: "assumeSync".}
 ## The decoders and `step` against mutated input (run under SANITIZE=1 too:
 ## every input sits in a malloc block of its exact size, so a read past it
 ## is caught). Seeds: RFC 8448's messages and records, and a real flight

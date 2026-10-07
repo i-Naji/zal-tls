@@ -1,3 +1,4 @@
+{.feature: "assumeSync".}
 import std/[assertions, syncio]
 import zal_tls/private/rawbuf
 

@@ -1,3 +1,4 @@
+{.feature: "assumeSync".}
 ## Public kTLS relay adapter, payload/half-close and control transitions.
 import std/[assertions, syncio]
 import zal_net/raw

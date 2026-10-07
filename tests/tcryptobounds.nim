@@ -1,3 +1,4 @@
+{.feature: "assumeSync".}
 ## Signed-size guards leave borrowed output and hash state unchanged.
 import std/[assertions, syncio]
 import zal_tls/common

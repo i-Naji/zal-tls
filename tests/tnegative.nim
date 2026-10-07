@@ -1,3 +1,4 @@
+{.feature: "assumeSync".}
 import std/[syncio, assertions]
 import zal_tls/common
 import zal_tls/crypto/[kx, sig, x509]

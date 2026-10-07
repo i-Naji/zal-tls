@@ -1,3 +1,4 @@
+{.feature: "assumeSync".}
 ## Resumption and 0-RTT over TlsStream: the client's store gets the
 ## server's tickets while it reads; the next connection resumes and its
 ## first bytes go as 0-RTT, which the server's application reads first;
