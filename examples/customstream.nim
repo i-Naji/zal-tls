@@ -39,7 +39,7 @@ proc finish(ctx: pointer): int {.passive.} =
   close(addr owner.tcp)
   result = 0
 
-var operations = StreamOps(recv: readMetered, send: writeMetered,
+let operations = StreamOps(recv: readMetered, send: writeMetered,
   shutdownWrite: endWrite, interrupt: cancel)
 var cfg = default(ClientConfig)
 var host = ""
@@ -47,12 +47,13 @@ var name = ""
 var remotePort = 0
 var succeeded = false
 
-proc fetch() {.passive.} =
+proc fetch(host: string; remotePort: int; cfg: ClientConfigPtr; name: string;
+           succeeded: ptr bool) {.passive.} =
   var owner = MeteredStream(tcp: connect(host, uint16(remotePort)))
   var tls = default(TlsStream)
   if owner.tcp.isOpen:
     let transport = unsafeBorrowStream(addr owner, addr operations)
-    let status = unsafeWrapClient(addr tls, transport, addr cfg, name)
+    let status = unsafeWrapClient(addr tls, transport, cfg, name)
     if status == 0:
       var request = "GET / HTTP/1.1\r\nHost: " & name & "\r\nConnection: close\r\n\r\n"
       if sendFrom(addr tls, textBytes(request), request.len) == request.len:
@@ -60,7 +61,7 @@ proc fetch() {.passive.} =
         while true:
           let count = recvInto(addr tls, addr response[0], response.len)
           if count <= 0:
-            succeeded = count == 0
+            succeeded[] = count == 0
             break
           for i in 0 ..< count: stdout.write char(response[i])
     else:
@@ -99,7 +100,7 @@ if trust == nil: quit "no trust anchors"
 cfg = defaultClientConfig(trust)
 cfg.alpn = @["http/1.1"]
 initRuntime()
-spawnTask fetch()
+spawnTask fetch(host, remotePort, addr cfg, name, addr succeeded)
 drainRuntime()
 release(trust)
 if not succeeded: quit 1
