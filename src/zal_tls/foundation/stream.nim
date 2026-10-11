@@ -1,5 +1,5 @@
 from zal_net/io import IoResult, ioResult
-## Optional loop-affine TLS owners. Forwarding keeps the reference in the
+## Retained TLS owners. Forwarding keeps the reference in the
 ## caller's passive frame. Configurations and friendly TCP transports are
 ## retained through handshake, I/O, background flushing and final cleanup.
 import zal_net/[rt, errors, buffers], zal_net/rt/[sync, cancel]
