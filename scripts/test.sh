@@ -41,13 +41,13 @@ for be in runtime; do
     name=$(basename "$src" .nim)
     out="$BUILD_DIR/$be/$name"
     if ! XDG_CACHE_HOME="$BUILD_DIR/$be/c-cache-$name" "$NIMONY" c --ff $flag "$@" --nimcache:"$BUILD_DIR/$be/cache-$name" -o:"$out" "$src" >"$out.log" 2>&1; then
-      echo "FAIL build $be $name (see $out.log)"; fail=1; continue
+      echo "FAIL build $be $name (see $out.log)"; tail -40 "$out.log"; fail=1; continue
     fi
     case "$src" in examples/*) echo "ok   build $be $name"; prune_case; continue;; esac
     case_failed=0
     for w in $WORKERS; do
       if ZAL_WORKERS=$w "$out" >"$out.w$w.out" 2>&1; then echo "ok   $be $name workers=$w"
-      else echo "FAIL $be $name workers=$w (see $out.w$w.out)"; fail=1; case_failed=1; fi
+      else echo "FAIL $be $name workers=$w (see $out.w$w.out)"; cat "$out.w$w.out"; fail=1; case_failed=1; fi
     done
     if [ "$case_failed" = 0 ]; then prune_case; fi
   done

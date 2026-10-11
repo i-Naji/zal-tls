@@ -55,7 +55,7 @@ foreach ($be in @("runtime")) {
     } finally {
       $env:LOCALAPPDATA = $previousLocalAppData
     }
-    if ($compileExit -ne 0) { Write-Output "FAIL build $be $name"; $fail = 1; continue }
+    if ($compileExit -ne 0) { Write-Output "FAIL build $be $name"; Get-Content "$BuildDir\$be\$name.log" -Tail 40; $fail = 1; continue }
     if ($src.DirectoryName -like "*examples") { Write-Output "ok   build $be $name"; continue }
     foreach ($worker in $Workers) {
       $env:ZAL_WORKERS = "$worker"
@@ -64,11 +64,14 @@ foreach ($be in @("runtime")) {
       $null = $process.Handle
       if (-not $process.WaitForExit($TimeoutSec * 1000)) {
         $process.Kill()
+        $process.WaitForExit()
         Write-Output "FAIL $be $name workers=$worker (timeout)"
         $fail = 1
+        Get-Content $output, "$output.err"
       } elseif ($process.ExitCode -ne 0) {
         Write-Output "FAIL $be $name workers=$worker"
         $fail = 1
+        Get-Content $output, "$output.err"
       } else {
         Write-Output "ok   $be $name workers=$worker"
       }
