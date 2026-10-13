@@ -177,8 +177,10 @@ proc verifyChain*(r: Roots; leaf: Cert; chain: openArray[Cert]; host: openArray[
     X509_STORE_CTX_free(ctx)
     sk_X509_free(sk)
     return
-  for c in chain: discard sk_X509_push(sk, c)
-  if X509_STORE_CTX_init(ctx, r, leaf, sk) == 1:
+  var pushed = true
+  for c in chain:
+    if sk_X509_push(sk, c) == 0: pushed = false
+  if pushed and X509_STORE_CTX_init(ctx, r, leaf, sk) == 1:
     let p = X509_STORE_CTX_get0_param(ctx)
     let which = if purpose == cpServer: PurposeSslServer else: PurposeSslClient
     X509_VERIFY_PARAM_set_hostflags(p, NeverCheckSubject)
