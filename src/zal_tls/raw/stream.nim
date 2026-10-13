@@ -2,8 +2,8 @@
 ## or `acceptTls`, then `recvInto`, `sendFrom`, `shutdownWrite`, `close`,
 ## so zal-net's `copy`, `relay` and `BufReader` work over TLS as they
 ## are. The procs take `ptr TlsStream` (`TlsStreamPtr`): a stream holds its
-## buffers and TLS state. Use a stream from one loop; one reader task and
-## one writer task may share it.
+## buffers and TLS state. Keep it alive until I/O finishes; one reader and
+## one writer may share it.
 ##
 ## ```nim
 ## var s = default(TlsStream)
