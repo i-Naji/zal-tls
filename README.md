@@ -20,5 +20,5 @@ proc main() {.passive.} =
 discard runMain(main())
 ```
 
-Use the compiler pinned by zal-net, `--mm:atomicArc` and `-d:useMimalloc`.
+Use the compiler pinned by zal-net and `--mm:atomicArc`. `-d:useMimalloc` is optional.
 See [build and ownership](docs/usage.md). MIT license.
