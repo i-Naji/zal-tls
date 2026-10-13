@@ -811,6 +811,7 @@ proc useKtls*(s: TlsStreamPtr; rx = true): int =
   ## space as before. A client of servers that send tickets right after the
   ## handshake may prefer rx = false.
   if s.customTransport: return NotSupported
+  if s.ktx: return 0
   if not s.initialized or not lockedState(s, isReady(s.conn)) or failureCode(s) != 0: return TlsFailed - alInternalError
   if writerActive(s) or s.ctlLen > 0 or lockedState(s, writeClosed(s.conn)) or lockedState(s, replyDue(s.conn)): return -16   # EBUSY
   var tx = default(Secret)
@@ -820,6 +821,7 @@ proc useKtls*(s: TlsStreamPtr; rx = true): int =
   if not lockedState(s, exportSecrets(s.conn, tx, rxs, txSeq, rxSeq)): return TlsFailed - alInternalError
   wipe(rxs)
   result = ktlsAttach(nativeHandle(s.tcp))
+  if result == -17: result = 0   # EEXIST: an earlier attempt failed at the keys
   if result == 0: result = ktlsKeys(nativeHandle(s.tcp), true, lockedState(s, suite(s.conn)), tx, txSeq)
   wipe(tx)
   if result != 0: return
@@ -839,12 +841,12 @@ proc isReady*(s: TlsStreamPtr): bool = s.initialized and lockedState(s, isReady(
 proc suite*(s: TlsStreamPtr): Suite = lockedState(s, suite(s.conn))
 proc alpn*(s: TlsStreamPtr): string = lockedState(s, alpn(s.conn))
 proc serverName*(s: TlsStreamPtr): string = lockedState(s, serverName(s.conn))
-proc resumed*(s: TlsStreamPtr): bool = s.conn.resumed
-proc retried*(s: TlsStreamPtr): bool = s.conn.retried
-proc earlyAccepted*(s: TlsStreamPtr): bool = s.conn.earlyAccepted
-proc earlyRejected*(s: TlsStreamPtr): bool = s.conn.earlyRejected
-proc echAccepted*(s: TlsStreamPtr): bool = s.conn.echAccepted
-proc hasPeerCertificate*(s: TlsStreamPtr): bool = s.conn.peerLeaf.len > 0
+proc resumed*(s: TlsStreamPtr): bool = lockedState(s, s.conn.resumed)
+proc retried*(s: TlsStreamPtr): bool = lockedState(s, s.conn.retried)
+proc earlyAccepted*(s: TlsStreamPtr): bool = lockedState(s, s.conn.earlyAccepted)
+proc earlyRejected*(s: TlsStreamPtr): bool = lockedState(s, s.conn.earlyRejected)
+proc echAccepted*(s: TlsStreamPtr): bool = lockedState(s, s.conn.echAccepted)
+proc hasPeerCertificate*(s: TlsStreamPtr): bool = lockedState(s, s.conn.peerLeaf.len > 0)
 proc peerLeafDer*(s: TlsStreamPtr): seq[byte] = lockedState(s, peerLeafDer(s.conn))
 proc echRetryConfigs*(s: TlsStreamPtr): seq[byte] = lockedState(s, echRetryConfigs(s.conn))
 proc usesKernelWrite*(s: TlsStreamPtr): bool = s.ktx

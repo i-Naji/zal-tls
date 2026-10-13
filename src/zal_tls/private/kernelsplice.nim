@@ -2,6 +2,10 @@
 # Exported only through the explicit raw/splice adapter, never the default import.
 import zal_net/raw/fdops
 
+template spliceUnsupported(count: int): bool =
+  # EINVAL, ENOSYS, EOPNOTSUPP: this socket or kernel cannot splice.
+  count == -22 or count == -38 or count == KtlsUnavailable
+
 type KernelCopyStats* = object
   bytes*: int64                  ## application bytes delivered to the TLS peer
   kernelBytes*: int64            ## delivered through socket -> pipe -> kTLS
@@ -131,10 +135,10 @@ proc copyToKernel*(source: TcpStreamPtr; destination: TlsStreamPtr;
         if count == 0: return
         if count > 0:
           inPipe = count
-        elif count == -22 or count == -38 or count == -95:
+        elif spliceUnsupported(count):
           buffered = true
           continue
-        elif count == -11:
+        elif count == KtlsAgain:
           parkIo(nativeHandle(source), {evRead}, limit(source.timeoutMs, deadline), ready, tok)
           if ready <= 0:
             result.error = if ready < 0: ready else: IoTimedOut
@@ -159,9 +163,9 @@ proc copyToKernel*(source: TcpStreamPtr; destination: TlsStreamPtr;
         if sinceYield >= 1048576:
           sinceYield = 0
           yieldNow()
-      elif count == -22 or count == -38 or count == -95:
+      elif spliceUnsupported(count):
         buffered = true
-      elif count == -11:
+      elif count == KtlsAgain:
         parkIo(nativeHandle(destination.tcp), {evWrite}, limit(destination.tcp.timeoutMs, deadline), ready, tok)
         if ready <= 0:
           result.error = if ready < 0: ready else: IoTimedOut
@@ -287,10 +291,10 @@ proc copyFromKernel*(source: TlsStreamPtr; destination: TcpStreamPtr;
             result.error = cold.error
             return
           continue
-        elif count == -22 or count == -38 or count == -95:
+        elif spliceUnsupported(count):
           buffered = true
           continue
-        elif count == -11:
+        elif count == KtlsAgain:
           parkIo(nativeHandle(source.tcp), {evRead}, limit(source.tcp.timeoutMs, deadline), ready, tok)
           if ready <= 0:
             result.error = if ready < 0: ready else: IoTimedOut
@@ -308,9 +312,9 @@ proc copyFromKernel*(source: TlsStreamPtr; destination: TcpStreamPtr;
         if sinceYield >= 1048576:
           sinceYield = 0
           yieldNow()
-      elif count == -22 or count == -38 or count == -95:
+      elif spliceUnsupported(count):
         buffered = true
-      elif count == -11:
+      elif count == KtlsAgain:
         parkIo(nativeHandle(destination), {evWrite}, limit(destination.timeoutMs, deadline), ready, tok)
         if ready <= 0:
           result.error = if ready < 0: ready else: IoTimedOut

@@ -1,4 +1,4 @@
-/* kTLS (Linux): the kernel's side of zal-tls io/ktls.nim. Only built on Linux.
+/* kTLS (Linux): the kernel's side of raw/ktls.nim. Only built on Linux.
    The kernel's ABI (linux/tls.h) is copied here, so any kernel headers do:
    the layouts and numbers are fixed; kernels without a cipher or TLS 1.3
    refuse at setsockopt (-EINVAL), not at compile time. */
@@ -91,15 +91,15 @@ int nt_ktls_set(int fd, int tx, int cipher, const unsigned char *key, const unsi
 
 /* One record of `type` (a control record: handshake, alert), non-blocking. */
 int nt_ktls_send(int fd, int type, const void *p, int n) {
-  char cbuf[CMSG_SPACE(sizeof(unsigned char))];
+  union { char buf[CMSG_SPACE(sizeof(unsigned char))]; struct cmsghdr align; } ctl;
   struct iovec iov = { (void *)p, (size_t)n };
   struct msghdr m;
   memset(&m, 0, sizeof m);
-  memset(cbuf, 0, sizeof cbuf);
+  memset(&ctl, 0, sizeof ctl);
   m.msg_iov = &iov;
   m.msg_iovlen = 1;
-  m.msg_control = cbuf;
-  m.msg_controllen = sizeof cbuf;
+  m.msg_control = ctl.buf;
+  m.msg_controllen = sizeof ctl.buf;
   struct cmsghdr *c = CMSG_FIRSTHDR(&m);
   c->cmsg_level = NT_SOL_TLS;
   c->cmsg_type = NT_TLS_SET_RECORD_TYPE;
@@ -112,16 +112,17 @@ int nt_ktls_send(int fd, int type, const void *p, int n) {
 /* Bytes of one record's plaintext and its type (23 when the kernel gives none),
    non-blocking: >0, 0 at EOF, NT_AGAIN (nothing yet), -errno. */
 int nt_ktls_recv(int fd, void *p, int n, int *type) {
-  char cbuf[CMSG_SPACE(sizeof(unsigned char))];
+  union { char buf[CMSG_SPACE(sizeof(unsigned char))]; struct cmsghdr align; } ctl;
   struct iovec iov = { p, (size_t)n };
   struct msghdr m;
   memset(&m, 0, sizeof m);
   m.msg_iov = &iov;
   m.msg_iovlen = 1;
-  m.msg_control = cbuf;
-  m.msg_controllen = sizeof cbuf;
+  m.msg_control = ctl.buf;
+  m.msg_controllen = sizeof ctl.buf;
   ssize_t r = recvmsg(fd, &m, MSG_DONTWAIT);
   if (r < 0) return err();
+  if (m.msg_flags & MSG_CTRUNC) return -EMSGSIZE;
   *type = 23;
   struct cmsghdr *c = CMSG_FIRSTHDR(&m);
   if (c && c->cmsg_level == NT_SOL_TLS && c->cmsg_type == NT_TLS_GET_RECORD_TYPE)
