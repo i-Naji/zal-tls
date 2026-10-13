@@ -3,7 +3,9 @@
 ## retain these owners; releasing an application reference cannot free their
 ## certificate, key, trust store or configuration while it is still borrowed.
 import zal_net/errors
+import zal_tls/common
 import zal_tls/config/config
+import zal_tls/crypto/rand
 import zal_tls/crypto/x509
 import zal_tls/trust/roots
 
@@ -105,6 +107,10 @@ proc newServerConfig*(certPem, keyPem: string; alpn: seq[string] = @[]): ServerC
   if result.message.len != 0: return
   owner.cfg = defaultServerConfig()
   owner.cfg.resolver = singleCert(addr owner.certificate)
+  # An address can be reused by a later configuration; tickets must not follow it.
+  var scope = default(array[16, byte])
+  if randomBytes(ptrOf(scope), scope.len):
+    for b in scope: owner.cfg.ticketScope.add char(b)
   for protocol in alpn: owner.cfg.alpn.add protocol
   result.value = owner
   result.code = 0
