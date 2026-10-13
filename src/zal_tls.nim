@@ -1,8 +1,6 @@
-## Application TLS: retained configurations/transports and enum-error byte I/O.
-## Client builders require an explicit trust source. Borrowed and transferring
-## wrapping have distinct contracts. Import zal_tls/raw for manual owners.
-## Keep the implementation's module name distinct from the customary `tls`
-## import alias: the pin confuses a re-exported namesake module with that alias.
-## zal-net compiler guards c43/c44 reproduce the failure and working form.
+## Application TLS over retained configurations and transports. Client
+## builders require an explicit trust source; import zal_tls/raw for manual
+## owners. Do not import this module as `tls`: Nimony confuses the alias with
+## the re-exported module (zal-net tests/compiler c43/c44).
 import zal_tls/private/application
 export application

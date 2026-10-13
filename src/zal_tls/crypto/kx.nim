@@ -9,6 +9,7 @@
 
 import zal_tls/common
 import zal_tls/crypto/awslc
+import zal_tls/crypto/rand
 
 type
   EcKeyObj {.importc: "EC_KEY", header: "<openssl/ec_key.h>", incompleteStruct.} = object
@@ -24,8 +25,7 @@ type
 
   KxKey* = object
     ## A client's private share. `clear` wipes it.
-    ## Owns C state: never copy it (pass it by `var` or pointer). The
-    ## `=copy` error below will enforce that once Nimony honours it (c35).
+    ## Owns C state: pass by `var` or pointer, never copy (c35).
     group*: KxGroup
     x: array[32, byte]               # X25519 private key (X25519, hybrid)
     ec: nil ptr EcKeyObj             # P-256 key
@@ -73,7 +73,6 @@ proc EVP_PKEY_encapsulate(c: ptr EvpPkeyCtxObj; ct: pointer; ctLen: ptr csize_t;
                           ss: pointer; ssLen: ptr csize_t): cint {.importc, header: "<openssl/evp.h>".}
 proc EVP_PKEY_decapsulate(c: ptr EvpPkeyCtxObj; ss: pointer; ssLen: ptr csize_t;
                           ct: pointer; ctLen: csize_t): cint {.importc, header: "<openssl/evp.h>".}
-proc OPENSSL_cleanse(p: pointer; n: csize_t) {.importc, header: "<openssl/mem.h>".}
 proc EC_KEY_set_public_key(k: ptr EcKeyObj; p: ptr EcPointObj): cint {.importc, header: "<openssl/ec_key.h>".}
 proc EC_POINT_mul(g: ptr EcGroupObj; r: ptr EcPointObj; n: ptr BignumObj; q: nil ptr EcPointObj;
                   m: nil ptr BignumObj; ctx: nil pointer): cint {.importc, header: "<openssl/ec.h>".}
@@ -127,7 +126,7 @@ proc p256Shared*(priv: Bytes; peer: Bytes;
 
 proc clear*(k: var KxKey) =
   ## Wipe the private share. Safe to call twice.
-  OPENSSL_cleanse(addr k.x[0], csize_t(k.x.len))
+  wipeBytes(addr k.x[0], k.x.len)
   EC_KEY_free(k.ec)
   k.ec = nil
   EVP_PKEY_free(k.kem)
@@ -184,7 +183,7 @@ proc complete*(k: var KxKey; peer: Bytes; peerLen: int;
     if EVP_PKEY_decapsulate(c, secret, addr n, peer, csize_t(MlKemCt)) == 1 and n == 32:
       result = X25519(addr secret[32], addr k.x[0], addr peer[MlKemCt]) == 1
     EVP_PKEY_CTX_free(c)
-  if not result: OPENSSL_cleanse(secret, csize_t(secretLen(k.group)))
+  if not result: wipeBytes(secret, secretLen(k.group))
 
 proc respond*(g: KxGroup; peer: Bytes; peerLen: int;
               share, secret: Bytes): bool =
@@ -210,7 +209,7 @@ proc respond*(g: KxGroup; peer: Bytes; peerLen: int;
         result = X25519(addr secret[32], addr k.x[0], addr peer[MlKemPub]) == 1
       EVP_PKEY_CTX_free(c)
     EVP_PKEY_free(pk)
-  if not result: OPENSSL_cleanse(secret, csize_t(secretLen(g)))
+  if not result: wipeBytes(secret, secretLen(g))
   clear(k)
 
 proc setPrivate*(k: var KxKey; g: KxGroup; priv: Bytes;

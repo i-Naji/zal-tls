@@ -13,8 +13,7 @@ type
 
   HpkeCtx* = object
     ## One HPKE context (a sender's or a recipient's). `clear` wipes it.
-    ## Owns C state: never copy it (pass it by `var` or pointer). The
-    ## `=copy` error below will enforce that once Nimony honours it (c35).
+    ## Owns C state: pass by `var` or pointer, never copy (c35).
     ctx: HpkeCtxC
     live: bool
 

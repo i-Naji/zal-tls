@@ -1,10 +1,9 @@
-## kTLS (Linux): after our handshake the kernel seals and opens the
-## records; a socket then carries plaintext through read and write.
-## Control records (a KeyUpdate, an alert) go through `ktlsSendRecord`
-## and come back from `ktlsRecv` with their type (a plain read fails with
-## EIO at one). A KeyUpdate needs new kernel keys (`ktlsKeys` again: TLS
-## 1.3 rekey; where the kernel lacks it the call fails and the connection
-## must end). Elsewhere every proc answers `KtlsUnavailable`.
+## kTLS (Linux): after the handshake the kernel seals and opens records, so a
+## socket carries plaintext. Control records (KeyUpdate, alert) use
+## `ktlsSendRecord` and `ktlsRecv`, which reports their type; a plain read
+## fails with EIO at one. A KeyUpdate needs new keys (`ktlsKeys` again); where
+## the kernel cannot rekey, the connection must end. Elsewhere every proc
+## answers `KtlsUnavailable`.
 
 import zal_net/[errors, buffers]
 import zal_tls/common
