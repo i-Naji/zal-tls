@@ -59,7 +59,7 @@ proc EC_POINT_point2oct(g: ptr EcGroupObj; p: ptr EcPointObj; form: cint; buf: p
 proc ECDH_compute_key(outp: pointer; outLen: csize_t; peer: ptr EcPointObj; priv: ptr EcKeyObj;
                       kdf: nil pointer): cint {.importc, header: "<openssl/ecdh.h>".}
 proc BN_bin2bn(inp: pointer; len: csize_t; ret: nil ptr BignumObj): nil ptr BignumObj {.importc, header: "<openssl/bn.h>".}
-proc BN_free(b: nil ptr BignumObj) {.importc, header: "<openssl/bn.h>".}
+proc BN_clear_free(b: nil ptr BignumObj) {.importc, header: "<openssl/bn.h>".}
 proc EVP_PKEY_CTX_new_id(id: cint; e: nil pointer): nil ptr EvpPkeyCtxObj {.importc, header: "<openssl/evp.h>".}
 proc EVP_PKEY_CTX_new(k: ptr EvpPkeyObj; e: nil pointer): nil ptr EvpPkeyCtxObj {.importc, header: "<openssl/evp.h>".}
 proc EVP_PKEY_CTX_free(c: nil ptr EvpPkeyCtxObj) {.importc, header: "<openssl/evp.h>".}
@@ -122,7 +122,7 @@ proc p256Shared*(priv: Bytes; peer: Bytes;
   let bn = BN_bin2bn(priv, 32, nil)
   if bn != nil and EC_KEY_set_private_key(k, bn) == 1:
     result = ecdh(k, peer, secret)
-  BN_free(bn)
+  BN_clear_free(bn)
   EC_KEY_free(k)
 
 proc clear*(k: var KxKey) =
@@ -184,6 +184,7 @@ proc complete*(k: var KxKey; peer: Bytes; peerLen: int;
     if EVP_PKEY_decapsulate(c, secret, addr n, peer, csize_t(MlKemCt)) == 1 and n == 32:
       result = X25519(addr secret[32], addr k.x[0], addr peer[MlKemCt]) == 1
     EVP_PKEY_CTX_free(c)
+  if not result: OPENSSL_cleanse(secret, csize_t(secretLen(k.group)))
 
 proc respond*(g: KxGroup; peer: Bytes; peerLen: int;
               share, secret: Bytes): bool =
@@ -209,6 +210,7 @@ proc respond*(g: KxGroup; peer: Bytes; peerLen: int;
         result = X25519(addr secret[32], addr k.x[0], addr peer[MlKemPub]) == 1
       EVP_PKEY_CTX_free(c)
     EVP_PKEY_free(pk)
+  if not result: OPENSSL_cleanse(secret, csize_t(secretLen(g)))
   clear(k)
 
 proc setPrivate*(k: var KxKey; g: KxGroup; priv: Bytes;
@@ -235,7 +237,7 @@ proc setPrivate*(k: var KxKey; g: KxGroup; priv: Bytes;
        EC_POINT_mul(grp, pub, bn, nil, nil, nil) == 1 and EC_KEY_set_public_key(ec, pub) == 1:
       result = EC_POINT_point2oct(grp, pub, PointUncompressed, share, 65, nil) == 65
     EC_POINT_free(pub)
-    BN_free(bn)
+    BN_clear_free(bn)
   of kxX25519MlKem768:
     discard                          # ML-KEM keys come from a seed: not needed by the vectors
 
