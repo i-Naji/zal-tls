@@ -92,6 +92,8 @@ proc newClientConfig*(trust: TrustSource; alpn: seq[string] = @[]): ClientConfig
   let owner = ClientConfigRef()
   owner.trust = roots
   owner.cfg = defaultClientConfig(roots)
+  when defined(windows):
+    if trust.kind == trustSystemKind: owner.cfg.verifier = systemVerifier(roots)
   for protocol in alpn: owner.cfg.alpn.add protocol
   result.value = owner
   result.code = 0

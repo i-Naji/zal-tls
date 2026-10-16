@@ -48,6 +48,7 @@ const
   alHandshakeFailure* = 40
   alBadCertificate* = 42
   alUnsupportedCertificate* = 43
+  alCertificateRevoked* = 44
   alCertificateExpired* = 45
   alCertificateUnknown* = 46
   alIllegalParameter* = 47
