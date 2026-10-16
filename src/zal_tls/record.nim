@@ -60,6 +60,8 @@ proc sealEarly*(c: TlsConnPtr; buf: Bytes; off, len: int): int {.inline.} =
 proc keyUpdate*(c: TlsConnPtr; requestPeer: bool; outp: Bytes; outCap: int): int {.inline.} =
   if not c.initialized: return 0
   result = implementation.keyUpdate(c.connection, requestPeer, outp, outCap)
+proc keyUpdateDue*(c: TlsConnPtr): bool {.inline.} =
+  result = c.initialized and implementation.keyUpdateDue(c.connection)
 proc takeControl*(c: TlsConnPtr; outp: Bytes; outCap: int): int {.inline.} =
   if not c.initialized: return 0
   result = implementation.takeControl(c.connection, outp, outCap)
