@@ -20,5 +20,8 @@ proc main() {.passive.} =
 discard runMain(main())
 ```
 
+`zal_tls/engine` plugs the same TLS into `std/streamio` as its `TlsEngine`.
+On Windows `systemTrust()` lets the system's chain engine judge first.
+
 Use the compiler pinned by zal-net and `--mm:atomicArc`. `-d:useMimalloc` is optional.
 See [build and ownership](docs/usage.md). MIT license.
