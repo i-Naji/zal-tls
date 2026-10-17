@@ -75,8 +75,9 @@ type
     rxWanted: bool               ## hand reading to the kernel at the next record boundary
     kClosePending: bool          ## kTLS: close_notify still to send
     kSent: int                   ## kTLS: bytes since the send sequence was last read
-    early: RawBuf                ## server: 0-RTT data taken during the handshake (replayable) ...
-    earlyAt: int                 ## ... delivered first, from here
+    early: RawBuf                ## server: replayable 0-RTT data from the handshake
+    earlyAt: int                 ## application read offset
+    earlyTotal: int              ## fixed after the handshake, independent of buffer lifetime
     background: BackgroundLease  ## borrowed context retained by queued flushes
 
   TlsStreamPtr* = ptr TlsStream
@@ -103,7 +104,7 @@ proc failureCode(s: TlsStreamPtr): int = atomicLoad(s.failed, moAcquire)
 proc earlyBytes*(s: TlsStreamPtr): int =
   ## Server: how many bytes came as 0-RTT (replayable): the first ones
   ## `recvInto` gives; no read returns them with later bytes.
-  s.early.len
+  s.earlyTotal
 
 proc transportOpen(s: TlsStreamPtr): bool =
   s.initialized and (if s.customTransport: isOpen(s.transport) else: s.tcp.isOpen)
@@ -132,6 +133,8 @@ proc setBackgroundLease*(s: TlsStreamPtr; lease: BackgroundLease): bool =
 
 proc releaseState(s: TlsStreamPtr) =
   free(s.early)
+  s.earlyAt = 0
+  s.earlyTotal = 0
   release(s.conn)
   wipeBytes(addr s.inb[0], InCap)
   wipeBytes(addr s.outb[0], OutCap)
@@ -289,6 +292,7 @@ proc handshake(s: TlsStreamPtr; deadline: Deadline; earlyP: nil pointer; earlyLe
     if st == stEarlyData:
       # Server: 0-RTT taken, kept for the application (before its input moves).
       append(s.early, at(ptrOf(s.inb), s.inHead + r.off), r.len)
+      s.earlyTotal = s.early.len
     dropInput(s, r.consumed)
     case st
     of stSend:
@@ -569,6 +573,7 @@ proc recvInto*(s: TlsStreamPtr; p: pointer; n: int; deadline = never;
     let k = min(n, s.early.len - s.earlyAt)
     copyMem(p, at(base(s.early), s.earlyAt), k)
     s.earlyAt = s.earlyAt + k
+    if s.earlyAt == s.early.len: free(s.early)
     return k
   while true:
     ioCheckpoint(0)

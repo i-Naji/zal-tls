@@ -34,17 +34,28 @@ proc echo1(t: TcpStreamPtr): int {.passive.} =
     return 0
   gSrvResumed = resumed(addr s)
   gSrvEarly = earlyAccepted(addr s)
-  gSrvEarlyBytes = earlyBytes(addr s)
+  let earlyCount = earlyBytes(addr s)
+  gSrvEarlyBytes = earlyCount
   var buf = default(array[256, byte])
+  when defined(nimNativeAlloc):
+    let occupiedBefore = getOccupiedMem()
   let n = recvInto(addr s, addr buf[0], buf.len)
+  when defined(nimNativeAlloc):
+    let occupiedAfter = getOccupiedMem()
+    if runtimeWorkers() == 1 and earlyCount > 0 and earlyCount <= buf.len:
+      expect(occupiedAfter < occupiedBefore, "consumed early data storage released before close")
+  expect(earlyBytes(addr s) == earlyCount, "early byte count survives consumption")
   gSrvFirst = ""
   for i in 0 ..< max(n, 0): gSrvFirst.add char(buf[i])
   if n > 0: discard sendFrom(addr s, addr buf[0], n)
   shutdownWrite(addr s)
   # Drain the rest of the request after our sending half-close. Closing TCP
   # with unread application bytes can reset it and discard the echo on Windows.
-  while recvInto(addr s, addr buf[0], buf.len) > 0: discard
+  while recvInto(addr s, addr buf[0], buf.len) > 0:
+    expect(earlyBytes(addr s) == earlyCount, "early byte count survives partial reads")
+  expect(earlyBytes(addr s) == earlyCount, "early byte count survives draining")
   close(addr s)
+  expect(earlyBytes(addr s) == 0, "closed stream releases early data state")
   result = 0
 
 var gLastResumed = false
@@ -99,6 +110,9 @@ proc main() {.passive.} =
   let back = request(port(l), big, true)
   expect(back.len == 256 and back == big.substr(0, 255), "the server echoes its first read")
   echo "PASS TlsStream: early data past the ticket's limit goes after the handshake"
+  let partial = big.substr(0, 8191)
+  expect(request(port(l), partial, true) == partial.substr(0, 255), "partial early read")
+  expect(gLastEarly and gSrvEarlyBytes == partial.len, "buffered early data drained in parts")
   # 5. Refused 0-RTT for another protocol than the ticket's: not sent again
   #    (RFC 8446 4.2.10); the connection is up, the caller decides.
   gClient.alpn = @["h2", "http/1.1"]
