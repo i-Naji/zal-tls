@@ -28,3 +28,15 @@ QUIC transport. Certificate verification is enabled.
 
 Platform availability is checked by native tests. AWS-LC is a separate dependency
 with its own licenses; it is not vendored here.
+
+The `std/streamio` engine keeps at most two records of unprocessed network
+input. Its default output queues follow the standard stream's draining policy.
+The current standard driver consumes a whole write before draining ciphertext
+and does not retry partial receive input.
+
+A custom driver can set `newTlsEngine(config, pendingLimit=65536)` to bound
+each output queue. Retry the suffix reported by `used`, drain `appOut` and
+`recordsOut` between calls, and drain records before calling `close`.
+A zero `used` means the queues need draining. The limit must fit one maximum
+record plus control output; 64 KiB is sufficient. Do not enable this limit
+when passing the engine to the current `std/streamio` driver.

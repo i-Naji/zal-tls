@@ -129,6 +129,61 @@ proc memory(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
     assert error == BadOperation
   records.release(addr s.c)
 
+proc bounded(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
+  const Limit = 64 * 1024
+  var s = initServer(config)
+  defer: records.release(addr s.c)
+  let e = newTlsEngine(client, pendingLimit=Limit)
+  assert handshake(e, s, "test.example")
+  let payload = pattern(1024 * 1024 + 7)
+  var sent = 0
+  while sent < payload.len:
+    var used = 0
+    e.appIn(payload.toOpenArray(sent, payload.len - 1), used)
+    assert used > 0 and used <= Limit
+    sent += used
+    var wire = ""
+    e.recordsOut(wire)
+    assert wire.len <= Limit
+    discard turn(s, wire)
+  assert s.app == payload
+
+  var wire = ""
+  var offset = 0
+  while offset < payload.len:
+    let n = min(MaxPlaintext, payload.len - offset)
+    wire.add sealed(s, payload.substr(offset, offset + n - 1))
+    offset += n
+  var received = ""
+  offset = 0
+  var rounds = 0
+  while received.len < payload.len:
+    var used = 0
+    e.recordsIn(wire.toOpenArray(offset, wire.len - 1), used)
+    if rounds == 0: assert used < wire.len
+    offset += used
+    var plain = ""
+    e.appOut(plain)
+    assert plain.len <= Limit
+    assert used > 0 or plain.len > 0
+    received.add plain
+    var control = ""
+    e.recordsOut(control)
+    assert control.len <= Limit
+    discard turn(s, control)
+    inc rounds
+  assert offset == wire.len and received == payload
+
+  let small = sealed(s, "fragmented record")
+  for ch in small:
+    var used = 0
+    let fragment = [ch]
+    e.recordsIn(fragment, used)
+    assert used == 1
+  var plain = ""
+  e.appOut(plain)
+  assert plain == "fragmented record"
+
 proc wrongName(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
   var s = initServer(config)
   let e = newTlsEngine(client)
@@ -200,6 +255,7 @@ proc main() {.passive.} =
     let config = tls.newServerConfig(text("tests/data/leaf.pem") & text("tests/data/inter.pem"),
                                      text("tests/data/leaf.key"), alpn = @["test"])
     memory(client, config)
+    bounded(client, config)
     wrongName(client, config)
     socket(client, config)
     echo "PASS std stream engine: in memory and over a socket"

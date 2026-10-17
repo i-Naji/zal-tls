@@ -22,7 +22,7 @@ type
   Conn = object
     c: records.TlsConn
     inb: seq[byte]            ## network bytes `step` has not consumed
-    inLen: int
+    head, tail: int
 
   ZalTlsEngine* = ref object of TlsEngine
     config: ClientConfigRef
@@ -31,6 +31,7 @@ type
     outb: seq[byte]           ## one step's output
     sealed: string            ## records waiting for `recordsOut`
     app: string               ## plaintext waiting for `appOut`
+    pendingLimit: int
     started, ready, peerClosed, closeSent, failed: bool
     alert*: int               ## after a failure: the alert sent ...
     reason*: string           ## ... and why
@@ -45,12 +46,16 @@ proc addBytes(dest: var string; src: pointer; n: int) =
     copyMem(beginStore(dest, old + n, old), src, n)
     endStore(dest)
 
-proc newTlsEngine*(config: ClientConfigRef; serverName = ""): ZalTlsEngine =
+proc newTlsEngine*(config: ClientConfigRef; serverName = ""; pendingLimit = 0): ZalTlsEngine {.raises.} =
   ## An engine for one connection, trusting what `config` trusts. A
   ## `serverName` replaces the address host for SNI and verification.
+  ## A positive pendingLimit bounds each output queue. The caller must drain
+  ## both queues and retry unconsumed input. std/streamio requires the default.
+  if pendingLimit < 0 or (pendingLimit > 0 and pendingLimit < OutCap):
+    raise BadOperation
   ZalTlsEngine(config: config, serverName: serverName,
-               conn: Conn(c: default(records.TlsConn), inb: newSeq[byte](InCap), inLen: 0),
-               outb: newSeq[byte](OutCap), sealed: "", app: "",
+               conn: Conn(c: default(records.TlsConn), inb: newSeq[byte](InCap), head: 0, tail: 0),
+               outb: newSeq[byte](OutCap), sealed: "", app: "", pendingLimit: pendingLimit,
                started: false, ready: false, peerClosed: false, closeSent: false,
                failed: false, alert: 0, reason: "")
 
@@ -66,15 +71,18 @@ proc control(e: ZalTlsEngine) =
   put(e, m)
 
 proc drive(e: ZalTlsEngine) {.raises.} =
-  # Steps over what is buffered until the connection wants more input.
+  # Leave incomplete records in place; compact only when the input is full.
   while true:
+    if e.pendingLimit > 0 and
+        (e.app.len > e.pendingLimit - MaxPlaintext or
+         e.sealed.len > e.pendingLimit - OutCap): return
     var r = default(StepResult)
-    let st = records.step(addr e.conn.c, bytesOf(e.conn.inb), e.conn.inLen,
+    let st = records.step(addr e.conn.c, at(bytesOf(e.conn.inb), e.conn.head), e.conn.tail - e.conn.head,
                           bytesOf(e.outb), e.outb.len, r)
     put(e, r.outLen)
     case st
     of stAppData, stEarlyData:
-      if r.len > 0: e.app.addBytes(addr e.conn.inb[r.off], r.len)
+      if r.len > 0: e.app.addBytes(addr e.conn.inb[e.conn.head + r.off], r.len)
     of stReady: e.ready = true
     of stPeerClosed, stClosed: e.peerClosed = true
     of stFailed:
@@ -83,9 +91,10 @@ proc drive(e: ZalTlsEngine) {.raises.} =
       e.reason = r.reason
     of stNeedInput, stSend: discard
     if r.consumed > 0:
-      let rest = e.conn.inLen - r.consumed
-      if rest > 0: moveMem(addr e.conn.inb[0], addr e.conn.inb[r.consumed], rest)
-      e.conn.inLen = rest
+      e.conn.head += r.consumed
+      if e.conn.head == e.conn.tail:
+        e.conn.head = 0
+        e.conn.tail = 0
     if st == stFailed: raise ProtocolError
     if st in {stNeedInput, stPeerClosed, stClosed}: return
     if r.consumed == 0 and r.outLen == 0 and st != stReady: return
@@ -99,27 +108,41 @@ method start*(e: ZalTlsEngine; host: string) {.raises.} =
   drive(e)
 
 method recordsIn*(e: ZalTlsEngine; src: openArray[char]; used: var int) {.raises.} =
-  used = src.len
+  used = 0
   if not e.started or e.failed: raise BadOperation
-  let need = e.conn.inLen + src.len
-  if need > e.conn.inb.len: e.conn.inb.setLen(need)
-  if src.len > 0: copyMem(addr e.conn.inb[e.conn.inLen], addr src[0], src.len)
-  e.conn.inLen = need
+  if e.peerClosed: return
   drive(e)
+  while used < src.len and not e.peerClosed:
+    if e.conn.tail == e.conn.inb.len and e.conn.head > 0:
+      let rest = e.conn.tail - e.conn.head
+      moveMem(addr e.conn.inb[0], addr e.conn.inb[e.conn.head], rest)
+      e.conn.head = 0
+      e.conn.tail = rest
+    let n = min(src.len - used, e.conn.inb.len - e.conn.tail)
+    if n == 0: break
+    copyMem(addr e.conn.inb[e.conn.tail], addr src[used], n)
+    e.conn.tail += n
+    used += n
+    drive(e)
 
 method recordsOut*(e: ZalTlsEngine; dest: var string) {.raises.} =
-  if e.ready and not e.failed and not e.closeSent: control(e)
+  if e.started and not e.failed: drive(e)
+  if e.ready and not e.failed and not e.closeSent and
+      (e.pendingLimit == 0 or e.sealed.len <= e.pendingLimit - OutCap): control(e)
   if e.sealed.len > 0:
     if dest.len == 0: dest = move e.sealed
     else: dest.add e.sealed
     e.sealed = ""
 
 method appIn*(e: ZalTlsEngine; src: openArray[char]; used: var int) {.raises.} =
-  if not e.ready or e.closeSent or e.failed: raise BadOperation
   used = 0
-  control(e)
+  if not e.ready or e.closeSent or e.failed: raise BadOperation
   while used < src.len:
-    let n = min(MaxPlaintext, src.len - used)
+    if e.pendingLimit > 0 and e.sealed.len > e.pendingLimit - OutCap: return
+    control(e)
+    let room = if e.pendingLimit == 0: MaxPlaintext else: e.pendingLimit - e.sealed.len - RecordHeaderLen - 17
+    let n = min(min(MaxPlaintext, room), src.len - used)
+    if n <= 0: return
     copyMem(addr e.outb[RecordHeaderLen], addr src[used], n)
     let m = records.sealApp(addr e.conn.c, bytesOf(e.outb), 0, n)
     if m == 0:
@@ -129,6 +152,7 @@ method appIn*(e: ZalTlsEngine; src: openArray[char]; used: var int) {.raises.} =
     used += n
 
 method appOut*(e: ZalTlsEngine; dest: var string) {.raises.} =
+  if e.started and not e.failed: drive(e)
   if e.app.len > 0:
     if dest.len == 0: dest = move e.app
     else: dest.add e.app
@@ -136,6 +160,8 @@ method appOut*(e: ZalTlsEngine; dest: var string) {.raises.} =
 
 method close*(e: ZalTlsEngine) {.raises.} =
   if e.ready and not e.closeSent and not e.failed:
+    if e.pendingLimit > 0 and e.sealed.len > e.pendingLimit - OutCap:
+      raise BadOperation
     control(e)
     put(e, records.close(addr e.conn.c, bytesOf(e.outb), e.outb.len))
     e.closeSent = true
