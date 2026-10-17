@@ -19,7 +19,7 @@ $Workers = @($Workers | ForEach-Object { $_.Split(",") } | Where-Object { $_ })
 $Tests = @($Tests | ForEach-Object { $_.Split(",") } | Where-Object { $_ })
 if ($Tests.Count -eq 0 -and $Suite -ne "full") {
   switch ($Suite) {
-    "fast" { $Tests = @("tbytes", "taead", "thash", "tconfig", "trecordapi", "thandshake", "ttlsref", "tapplicationtls", "tcryptobounds", "twritergate") }
+    "fast" { $Tests = @("tbytes", "taead", "thash", "tconfig", "trecordapi", "thandshake", "ttlsref", "tapplicationtls", "tcryptobounds", "twritergate", "tstreamengine") }
     "stress" { $Tests = @("tmemory", "tfuzz") }
     "platform" { $Tests = @("tktls", "tktlsbounds", "tkernelsplice", "tkernelrelay") }
   }

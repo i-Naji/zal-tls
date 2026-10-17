@@ -18,7 +18,7 @@ mkdir -p "$BUILD_DIR"
 BUILD_DIR=$(cd "$BUILD_DIR" && pwd)
 if [ -z "${TESTS:-${ONLY:-}}" ]; then
   case "${SUITE:-fast}" in
-    fast) TESTS="tbytes taead thash tconfig trecordapi thandshake ttlsref tapplicationtls tcryptobounds twritergate" ;;
+    fast) TESTS="tbytes taead thash tconfig trecordapi thandshake ttlsref tapplicationtls tcryptobounds twritergate tstreamengine" ;;
     full) ;;
     stress) TESTS="tmemory tfuzz" ;;
     platform) TESTS="tktls tktlsbounds tkernelsplice tkernelrelay" ;;
