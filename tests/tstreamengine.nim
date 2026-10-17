@@ -131,6 +131,12 @@ proc memory(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
 
 proc bounded(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
   const Limit = 64 * 1024
+  for limit in [-1, 1]:
+    try:
+      discard newTlsEngine(client, pendingLimit=limit)
+      assert false
+    except ErrorCode as error:
+      assert error == BadOperation
   var s = initServer(config)
   defer: records.release(addr s.c)
   let e = newTlsEngine(client, pendingLimit=Limit)
@@ -183,6 +189,26 @@ proc bounded(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
   var plain = ""
   e.appOut(plain)
   assert plain == "fragmented record"
+
+  var used = 0
+  e.appIn(payload, used)
+  assert used > 0 and used < payload.len
+  try:
+    e.close()
+    assert false
+  except ErrorCode as error:
+    assert error == BadOperation
+  wire = ""
+  e.recordsOut(wire)
+  assert wire.len <= Limit
+  discard turn(s, wire)
+  assert not s.peerClosed
+  e.close()
+  wire = ""
+  e.recordsOut(wire)
+  assert wire.len <= Limit
+  discard turn(s, wire)
+  assert s.peerClosed
 
 proc wrongName(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
   var s = initServer(config)
