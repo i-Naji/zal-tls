@@ -100,7 +100,6 @@ proc disposeRejectedClose(owner: TlsConnRef) =
 
 proc finishControl(owner: TlsConnRef) =
   endControl(owner.life)
-  signalIdle(owner.life)
   disposeRejectedClose(owner)
 
 proc acquireBackground(context: pointer) {.nimcall.} =
@@ -304,7 +303,6 @@ proc beginOperation(owner: TlsConnRef; write: bool): int =
 
 proc endOperation(owner: TlsConnRef; write: bool) =
   endBorrow(owner.life, write)
-  signalIdle(owner.life)
   disposeRejectedClose(owner)
 
 template recvInto*(owner: TlsConnRef; p: pointer; n: int; deadline: Deadline = never;
