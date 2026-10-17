@@ -158,11 +158,7 @@ proc shutdownWrite*(stream: TlsStream) {.raises.} = checkTls(owners.shutdownWrit
 proc lastReadFailure*(stream: TlsStream): IoFailure {.inline.} = owners.lastReadFailure(stream)
 proc lastWriteFailure*(stream: TlsStream): IoFailure {.inline.} = owners.lastWriteFailure(stream)
 
-template negotiatedProtocol*(stream: TlsStream): string =
-  ## Empty means no ALPN was selected. HTTP can reject an unexpected protocol.
-  # The pinned compiler mislowers a raises/string result in passive callers.
-  block:
-    let held = stream
-    var protocol = ""
-    checkTls(owners.negotiatedProtocol(held, protocol))
-    protocol
+proc negotiatedProtocol*(stream: TlsStream): string {.raises.} =
+  ## Empty means no ALPN was selected.
+  result = ""
+  checkTls(owners.negotiatedProtocol(stream, result))
