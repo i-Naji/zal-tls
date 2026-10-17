@@ -2,11 +2,18 @@ name: tests
 on: [workflow_dispatch]
 jobs:
   test:
+    continue-on-error: ${{ matrix.compiler == 'upstream' }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        compiler: [pinned]
+        include:
+          - os: ubuntu-latest
+            compiler: upstream
     runs-on: ${{ matrix.os }}
+    env:
+      NIMONY_REF: ${{ matrix.compiler == 'upstream' && 'master' || '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Network revision
