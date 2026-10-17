@@ -110,6 +110,17 @@ proc memory(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
   assert wire.len > big.len + 2 * 22
   assert turn(s, wire).len == 0
   assert s.app == "hello" & big
+  for size in [1, 2, 7, 15, 16, 32, 4095, 4096, 4097, 16384, 16385]:
+    let payload = pattern(size)
+    s.app = ""
+    e.appIn(payload, used)
+    assert used == payload.len
+    wire = "prefix"
+    let prefix = wire
+    e.recordsOut(wire)
+    assert prefix == "prefix" and wire.substr(0, 5) == prefix
+    assert turn(s, wire.substr(6)).len == 0
+    assert s.app == payload
   e.close()
   wire = ""
   e.recordsOut(wire)
@@ -210,6 +221,33 @@ proc bounded(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
   discard turn(s, wire)
   assert s.peerClosed
 
+when defined(tlsEngineBench):
+  proc measureOutput(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
+    for size in [64, 1024, 4096, 16384, 262144]:
+      let payload = pattern(size)
+      let rounds = if size > MaxPlaintext: 256 else: 4096
+      for run in 0..<5:
+        var s = initServer(config)
+        let e = newTlsEngine(client)
+        assert handshake(e, s, "test.example")
+        var checked = 0
+        e.appIn(payload, checked)
+        var first = ""
+        e.recordsOut(first)
+        discard turn(s, first)
+        assert checked == size and s.app == payload
+        let started = monoNow()
+        for iteration in 0..<rounds:
+          var used = 0
+          e.appIn(payload, used)
+          assert used == size
+          var wire = ""
+          e.recordsOut(wire)
+          assert wire.len == size + ((size + MaxPlaintext - 1) div MaxPlaintext) * 22
+        let elapsed = int64(monoNow()) - int64(started)
+        records.release(addr s.c)
+        echo "write_bytes=", size, " rounds=", rounds, " elapsed_ns=", elapsed
+
 proc wrongName(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
   var s = initServer(config)
   let e = newTlsEngine(client)
@@ -280,11 +318,14 @@ proc main() {.passive.} =
     let client = tls.newClientConfig(pemTrust(text("tests/data/root.pem")), alpn = @["test"])
     let config = tls.newServerConfig(text("tests/data/leaf.pem") & text("tests/data/inter.pem"),
                                      text("tests/data/leaf.key"), alpn = @["test"])
-    memory(client, config)
-    bounded(client, config)
-    wrongName(client, config)
-    socket(client, config)
-    echo "PASS std stream engine: in memory and over a socket"
+    when defined(tlsEngineBench):
+      measureOutput(client, config)
+    else:
+      memory(client, config)
+      bounded(client, config)
+      wrongName(client, config)
+      socket(client, config)
+      echo "PASS std stream engine: in memory and over a socket"
   except ErrorCode as error:
     echo "unexpected error ", error
     assert false

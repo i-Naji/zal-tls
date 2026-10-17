@@ -11,10 +11,13 @@ import zal_tls/common
 import zal_tls/record as records
 import zal_tls/config/owned
 import zal_tls/crypto/rand
+from zal_tls/crypto/aead import AeadTagLen
 
 export streamio.TlsEngine, ClientConfigRef
 
 const
+  DirectSealMin = 4096
+  RecordOverhead = RecordHeaderLen + 1 + AeadTagLen
   InCap = 2 * (RecordHeaderLen + MaxCiphertext)
   OutCap = RecordHeaderLen + MaxCiphertext + 64
 
@@ -140,15 +143,29 @@ method appIn*(e: ZalTlsEngine; src: openArray[char]; used: var int) {.raises.} =
   while used < src.len:
     if e.pendingLimit > 0 and e.sealed.len > e.pendingLimit - OutCap: return
     control(e)
-    let room = if e.pendingLimit == 0: MaxPlaintext else: e.pendingLimit - e.sealed.len - RecordHeaderLen - 17
+    let room = if e.pendingLimit == 0: MaxPlaintext else: e.pendingLimit - e.sealed.len - RecordOverhead
     let n = min(min(MaxPlaintext, room), src.len - used)
     if n <= 0: return
-    copyMem(addr e.outb[RecordHeaderLen], addr src[used], n)
-    let m = records.sealApp(addr e.conn.c, bytesOf(e.outb), 0, n)
-    if m == 0:
-      e.failed = true
-      raise ProtocolError
-    put(e, m)
+    if n < DirectSealMin:
+      copyMem(addr e.outb[RecordHeaderLen], addr src[used], n)
+      let m = records.sealApp(addr e.conn.c, bytesOf(e.outb), 0, n)
+      if m == 0:
+        e.failed = true
+        raise ProtocolError
+      put(e, m)
+    else:
+      let start = e.sealed.len
+      let size = RecordOverhead + n
+      let output = cast[Bytes](beginStore(e.sealed, start + size, start))
+      copyMem(addr output[RecordHeaderLen], addr src[used], n)
+      let m = records.sealApp(addr e.conn.c, output, 0, n)
+      if m == 0:
+        wipeBytes(output, size)
+        endStore(e.sealed)
+        e.sealed.setLen(start)
+        e.failed = true
+        raise ProtocolError
+      endStore(e.sealed)
     used += n
 
 method appOut*(e: ZalTlsEngine; dest: var string) {.raises.} =
