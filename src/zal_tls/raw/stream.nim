@@ -59,7 +59,7 @@ type
     tcp: TcpStream
     conn: TlsConn
     inb: array[InCap, byte]
-    inLen: int
+    inHead, inLen: int
     pendOff, pendLen: int        ## decrypted data not yet delivered (it lies in inb) ...
     pendUsed: int                ## ... and the input bytes to drop once it is
     outb: array[OutCap, byte]    ## the writer's
@@ -190,9 +190,16 @@ proc endTransport(s: TlsStreamPtr) =
 
 proc dropInput(s: TlsStreamPtr; n: int) =
   if n <= 0: return
-  let rest = s.inLen - n
-  if rest > 0: moveMem(addr s.inb[0], addr s.inb[n], rest)
-  s.inLen = rest
+  s.inHead += n
+  s.inLen -= n
+  if s.inLen == 0: s.inHead = 0
+
+proc inputRoom(s: TlsStreamPtr): int =
+  # Keep unread records in place until the tail reaches the buffer end.
+  if s.inHead + s.inLen == InCap and s.inHead > 0:
+    moveMem(addr s.inb[0], addr s.inb[s.inHead], s.inLen)
+    s.inHead = 0
+  InCap - s.inHead - s.inLen
 
 proc writeRaw(s: TlsStreamPtr; p: Bytes; n: int; deadline: Deadline;
               tok: nil CancelToken = nil): int {.passive.} =
@@ -278,10 +285,10 @@ proc handshake(s: TlsStreamPtr; deadline: Deadline; earlyP: nil pointer; earlyLe
   var triedEarly = false
   while true:
     if cancelled(tok): return fail(s, ECancelled)
-    let st = lockedState(s, step(s.conn, ptrOf(s.inb), s.inLen, ptrOf(s.outb), OutCap, r))
+    let st = lockedState(s, step(s.conn, at(ptrOf(s.inb), s.inHead), s.inLen, ptrOf(s.outb), OutCap, r))
     if st == stEarlyData:
       # Server: 0-RTT taken, kept for the application (before its input moves).
-      append(s.early, at(ptrOf(s.inb), r.off), r.len)
+      append(s.early, at(ptrOf(s.inb), s.inHead + r.off), r.len)
     dropInput(s, r.consumed)
     case st
     of stSend:
@@ -294,8 +301,9 @@ proc handshake(s: TlsStreamPtr; deadline: Deadline; earlyP: nil pointer; earlyLe
         if k < 0: return k
         earlySent = k
     of stNeedInput:
-      if s.inLen == InCap: return fail(s, TlsFailed - alInternalError)
-      let n = readTransport(s, addr s.inb[s.inLen], InCap - s.inLen, deadline, tok)
+      let room = inputRoom(s)
+      if room == 0: return fail(s, TlsFailed - alInternalError)
+      let n = readTransport(s, addr s.inb[s.inHead + s.inLen], room, deadline, tok)
       if n == 0: return fail(s, TlsEof)
       if n < 0: return fail(s, n)
       s.inLen = s.inLen + n
@@ -538,10 +546,10 @@ proc kernelRecv(s: TlsStreamPtr; p: pointer; n: int; deadline: Deadline;
     if res <= 0: return (if res < 0: res else: IoTimedOut)
 
 proc recordRest(s: TlsStreamPtr): int =
-  ## Bytes still missing from the record at the start of inb (a header
+  ## Bytes still missing from the first unread record (a header
   ## first): what may be read while reading moves to the kernel.
   if s.inLen < RecordHeaderLen: return RecordHeaderLen - s.inLen
-  let n = RecordHeaderLen + ((int(s.inb[3]) shl 8) or int(s.inb[4]))
+  let n = RecordHeaderLen + ((int(s.inb[s.inHead + 3]) shl 8) or int(s.inb[s.inHead + 4]))
   result = max(0, n - s.inLen)
 
 proc recvInto*(s: TlsStreamPtr; p: pointer; n: int; deadline = never;
@@ -583,19 +591,20 @@ proc recvInto*(s: TlsStreamPtr; p: pointer; n: int; deadline = never;
         s.krx = true
         continue
     var r = default(StepResult)
-    let st = lockedState(s, step(s.conn, ptrOf(s.inb), s.inLen, ptrOf(s.rdOut), CtlCap, r))
+    let st = lockedState(s, step(s.conn, at(ptrOf(s.inb), s.inHead), s.inLen, ptrOf(s.rdOut), CtlCap, r))
     case st
     of stAppData, stEarlyData:
-      s.pendOff = r.off
+      s.pendOff = s.inHead + r.off
       s.pendLen = r.len
       s.pendUsed = r.consumed
     of stNeedInput, stReady:
       dropInput(s, r.consumed)
       if st == stNeedInput:
-        if s.inLen == InCap: return fail(s, TlsFailed - alInternalError)
+        let room = inputRoom(s)
+        if room == 0: return fail(s, TlsFailed - alInternalError)
         # Before the kernel takes reading over: no byte past this record.
-        let want = if s.rxWanted: recordRest(s) else: InCap - s.inLen
-        let k = readTransport(s, addr s.inb[s.inLen], want, deadline, tok)
+        let want = if s.rxWanted: min(recordRest(s), room) else: room
+        let k = readTransport(s, addr s.inb[s.inHead + s.inLen], want, deadline, tok)
         if k == 0: return fail(s, TlsTruncated)
         if k < 0: return k                     # a timeout or error; the stream stays usable after a timeout
         s.inLen = s.inLen + k
