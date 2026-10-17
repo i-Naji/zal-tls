@@ -3,7 +3,8 @@
 ## acquire keeps that context alive until the matching drop, without blocking.
 type BackgroundLease* = object
   context*: nil pointer
-  acquire*, drop*: nil proc (context: pointer) {.nimcall.}
+  acquire*: nil proc (context: pointer) {.nimcall.}
+  drop*: nil proc (context: pointer) {.nimcall.}
 
 proc retain*(lease: BackgroundLease) =
   let context = lease.context
