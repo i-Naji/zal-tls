@@ -402,7 +402,9 @@ pass(b, ab, ba)
 pass(a, ba, ab)
 block:
   let r2 = helloAt(ab)
-  var m = recordMsg(ab[r2 ..< ab.len])
+  var rest: seq[byte] = @[]
+  for i in r2 ..< ab.len: rest.add ab[i]
+  var m = recordMsg(rest)
   var v2 = default(HelloView)
   expect(parseClientHello(bytesOf(m), m.len, v2) == 0 and v2.echLen > 0, "the second hello")
   ab[r2 + 5 + v2.echAt - 3] = 0x0e               # its ECH extension renamed: none

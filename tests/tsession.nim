@@ -124,7 +124,9 @@ block:
   expect(tk.seal(tk.ctx, addr st, ta), "seal a")
   gTickNow = gTickNow + 11_000
   expect(tk.seal(tk.ctx, addr st, tb), "seal b")
-  expect(ta[0 .. 3] != tb[0 .. 3], "a new key after 10 s")
+  var newKey = false
+  for i in 0 .. 3: newKey = newKey or ta[i] != tb[i]
+  expect(newKey, "a new key after 10 s")
   var back = default(SessionState)
   expect(tk.open(tk.ctx, bytesOf(ta), ta.len, back), "a opens under the previous key")
   gTickNow = gTickNow + 11_000
