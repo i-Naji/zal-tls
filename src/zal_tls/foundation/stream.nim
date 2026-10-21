@@ -143,7 +143,10 @@ proc attach(owner: TlsConnRef; cfg: ServerConfigRef): ServerConfigPtr =
 template connectTlsConn*(cfg: ClientConfigRef; host: string; port: uint16;
                          serverName = ""; deadline: Deadline = never;
                          timeoutMs = 10_000; handshakeMs = DefaultHandshakeMs;
-                         tok: nil CancelToken = nil): TlsConnResult =
+                         tok: nil CancelToken = nil; earlyData: nil pointer = nil;
+                         earlyLen = 0): TlsConnResult =
+  ## `earlyData`: the first bytes to send, as in `connectTls`. The owner is
+  ## closed when they could not be sent (`TlsEarlyNotSent`).
   block:
     var outcome = default(TlsConnResult)
     outcome.code = constructionAllowed()
@@ -152,7 +155,8 @@ template connectTlsConn*(cfg: ClientConfigRef; host: string; port: uint16;
       let owner = newOwner()
       let name = host
       let code = connectTls(name, port, attach(owner, configuration), rawStream(owner),
-                            serverName, deadline, timeoutMs, handshakeMs, tok=tok)
+                            serverName, deadline, timeoutMs, handshakeMs, earlyData,
+                            earlyLen, tok)
       outcome = initialized(owner, code)
     outcome
 

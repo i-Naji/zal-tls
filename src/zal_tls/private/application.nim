@@ -50,6 +50,23 @@ template connect*(config: ClientConfig; host: string; port: uint16;
       failIo(ResourceClosed)
     value
 
+template connect*(config: ClientConfig; host: string; port: uint16;
+                  request: openArray[byte]; serverName = ""; deadline: Deadline = never;
+                  cancel: nil CancelToken = nil): TlsStream =
+  ## Connect and send `request` before returning, all within `deadline`. With
+  ## a resumable session and `earlyData` on the configuration it goes as 0-RTT,
+  ## which an attacker can replay: idempotent requests only.
+  block:
+    let bytes: openArray[byte] = request
+    let connected = owners.connectTlsConn(config, host, port,
+      serverName=serverName, deadline=deadline, tok=cancel,
+      earlyData=dataPtr(bytes), earlyLen=bytes.len)
+    checkTls(connected.code)
+    let value = connected.value
+    if value == nil:
+      failIo(ResourceClosed)
+    value
+
 template wrapBorrowed*(config: ClientConfig; transport: TcpStream; serverName: string;
                        deadline: Deadline = never; cancel: nil CancelToken = nil): TlsStream =
   block:

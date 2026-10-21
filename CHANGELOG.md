@@ -13,3 +13,4 @@
 - Use the zal-net checkpoint for Nimony `2593bf85`.
 - Let Windows' chain engine judge chains against the system trust first.
 - Plug zal-tls into `std/streamio` as a `TlsEngine` (`zal_tls/engine`).
+- `connect` can send the first request, as 0-RTT when a ticket allows.
