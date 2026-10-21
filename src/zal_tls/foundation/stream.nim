@@ -28,6 +28,7 @@ type
     backgroundCount: int
     cleanup: bool                  ## retaining close task has been admitted
     readFailure, writeFailure: IoFailure
+    standing: int64                ## standing deadline, 0 for none; atomic
     when not defined(release):
       counted: bool
   TlsConnRef* = ref TlsConnObj
@@ -301,6 +302,20 @@ template takeTlsClient*(cfg: ClientConfigRef; tcp: var nil TcpConnRef; serverNam
           outcome = initialized(owner, code)
     outcome
 
+proc deadline*(owner: TlsConnRef): Deadline =
+  ## The standing deadline each read and write honours besides its own.
+  let at = atomicLoad(owner.standing, moRelaxed)
+  result = if at == 0: never else: Deadline(at)
+
+proc renew*(owner: TlsConnRef; deadline: Deadline) =
+  ## Replace the standing deadline; `never` clears it. A parked operation
+  ## keeps the deadline it started with.
+  atomicStore(owner.standing, (if deadline == never: 0'i64 else: int64(deadline)), moRelaxed)
+
+proc bounded(owner: TlsConnRef; deadline: Deadline): Deadline {.inline.} =
+  let at = atomicLoad(owner.standing, moRelaxed)
+  result = if at == 0: deadline else: earlier(deadline, Deadline(at))
+
 proc beginOperation(owner: TlsConnRef; write: bool): int =
   if stopping(): return ResourceClosed
   result = beginBorrow(owner.life, write)
@@ -316,7 +331,7 @@ template recvInto*(owner: TlsConnRef; p: pointer; n: int; deadline: Deadline = n
     var count = beginOperation(held, false)
     if count == 0:
       defer: endOperation(held, false)
-      count = recvInto(rawStream(held), p, n, deadline, tok)
+      count = recvInto(rawStream(held), p, n, bounded(held, deadline), tok)
       if count < 0 and state(held) == ownerClosing: count = ResourceClosed
     count
 
@@ -327,7 +342,7 @@ template sendFrom*(owner: TlsConnRef; p: pointer; n: int; deadline: Deadline = n
     var count = beginOperation(held, true)
     if count == 0:
       defer: endOperation(held, true)
-      count = sendFrom(rawStream(held), p, n, deadline, tok)
+      count = sendFrom(rawStream(held), p, n, bounded(held, deadline), tok)
       if count < 0 and state(held) == ownerClosing: count = ResourceClosed
     count
 
@@ -395,7 +410,7 @@ template writeAllInto*(owner: TlsConnRef; p: pointer; n: int;
     let held = owner
     let source = p
     let size = n
-    let until: Deadline = deadline
+    let until: Deadline = bounded(held, deadline)
     let token: nil CancelToken = tok
     retain(token)
     defer: release(token)

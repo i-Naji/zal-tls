@@ -22,6 +22,8 @@ One reader and one writer may coexist. Writes and control records preserve
 record order. Locks cover bounded state changes and are released before waits.
 Close cancels new admission and joins pending operations and background tasks.
 A deadline never permits releasing storage still used by an operation.
+`renew` sets a standing deadline; each read and write ends at the earlier of
+it and its own.
 Ambiguous partial protocol progress makes the connection unusable; do not replay.
 TLS wraps only public zal-net interfaces. QUIC mode is a handshake API, not a
 QUIC transport. Certificate verification is enabled.

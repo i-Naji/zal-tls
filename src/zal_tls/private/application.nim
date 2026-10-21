@@ -174,6 +174,8 @@ template close*(stream: TlsStream; deadline: Deadline = never) =
 proc shutdownWrite*(stream: TlsStream) {.raises.} = checkTls(owners.shutdownWrite(stream))
 proc lastReadFailure*(stream: TlsStream): IoFailure {.inline.} = owners.lastReadFailure(stream)
 proc lastWriteFailure*(stream: TlsStream): IoFailure {.inline.} = owners.lastWriteFailure(stream)
+proc deadline*(stream: TlsStream): Deadline {.inline.} = owners.deadline(stream)
+proc renew*(stream: TlsStream; deadline: Deadline) {.inline.} = owners.renew(stream, deadline)
 
 proc negotiatedProtocol*(stream: TlsStream): string {.raises.} =
   ## Empty means no ALPN was selected.
