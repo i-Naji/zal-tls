@@ -15,3 +15,4 @@
 - Plug zal-tls into `std/streamio` as a `TlsEngine` (`zal_tls/engine`).
 - `connect` can send the first request, as 0-RTT when a ticket allows.
 - Add a standing deadline to TLS streams (`deadline`, `renew`).
+- A TLS stream dropped without close still sends close_notify when the socket takes it at once.

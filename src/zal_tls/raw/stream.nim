@@ -141,16 +141,26 @@ proc releaseState(s: TlsStreamPtr) =
   wipeBytes(addr s.rdOut[0], CtlCap)
   wipeBytes(addr s.ctl[0], CtlCap)
 
+proc dropNotify(s: TlsStreamPtr) =
+  ## A dropped stream still says close_notify when one send can take it, so
+  ## the peer tells a finished stream from a cut one. Never waits.
+  if s.ktx or s.ctlLen > 0 or failureCode(s) != 0 or not s.tcp.isOpen: return
+  var rec = default(array[64, byte])
+  let n = lockedState(s, close(s.conn, ptrOf(rec), rec.len))
+  if n > 0: discard writeSome(nativeHandle(s.tcp), ptrOf(rec), n)
+
 proc closeNow*(s: TlsStreamPtr): bool =
-  ## Quiescent, nonblocking disposal without close_notify. Caller has finished
-  ## every borrower. False preserves the owner if a writer/flush still uses it
-  ## or a transferred custom transport lacks synchronous disposal.
+  ## Quiescent, nonblocking disposal. Caller has finished every borrower.
+  ## close_notify goes only if the socket takes it at once. False preserves
+  ## the owner if a writer/flush still uses it or a transferred custom
+  ## transport lacks synchronous disposal.
   if not s.initialized: return true
   if writerActive(s) or flushPending(s): return false
   if s.customTransport and s.ownsTransport:
     let owner = s.transportOwner
     if owner != nil and dispose(owner) != 0: return false
   elif not s.customTransport:
+    dropNotify(s)
     close(addr s.tcp)
   releaseState(s)
   s.transport = default(StreamView)
