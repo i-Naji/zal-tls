@@ -13,6 +13,8 @@ param(
 )
 $ErrorActionPreference = "Continue"
 Set-Location (Join-Path $PSScriptRoot "..")
+# The compiler builds zal-net's plugins in their own directory: give it a path that stays valid there.
+$ZalNetDir = (Resolve-Path $ZalNetDir).Path
 New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 $BuildDir = (Resolve-Path $BuildDir).Path
 $Workers = @($Workers | ForEach-Object { $_.Split(",") } | Where-Object { $_ })

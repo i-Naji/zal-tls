@@ -16,3 +16,6 @@
 - `connect` can send the first request, as 0-RTT when a ticket allows.
 - Add a standing deadline to TLS streams (`deadline`, `renew`).
 - A TLS stream dropped without close still sends close_notify when the socket takes it at once.
+- Use the zal-net checkpoint for Nimony `c923e3c9`.
+- TLS owners close with `retire` and half-close with `halfClose`; `close` and `shutdownWrite` are the raising forms of the TLS stream.
+- scripts/test.sh and scripts/test.ps1 pass zal-net to the compiler as an absolute path.

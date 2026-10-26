@@ -2,7 +2,7 @@
 import std/[assertions, syncio]
 import zal_net/rt, zal_net/rt/sync
 import zal_net/rt/cancel as cancellation
-import zal_net/net/tcp as tcp
+import zal_net/net/tcp as nettcp
 import zal_tls as tls
 
 type Context = ref object
@@ -17,9 +17,9 @@ proc text(path: string): string =
   except:
     result = ""
 
-proc peer(server: sink tcp.TcpListener; ctx: sink Context) {.passive.} =
+proc peer(server: sink nettcp.TcpListener; ctx: sink Context) {.passive.} =
   try:
-    var underlying: nil tcp.TcpStream = server.accept(deadline=afterMs(5000))
+    var underlying: nil nettcp.TcpStream = server.accept(deadline=afterMs(5000))
     let config = ctx.config
     if config == nil:
       assert false
@@ -50,7 +50,7 @@ proc main() {.passive.} =
     let ctx = Context()
     ctx.config = tls.newServerConfig(text("tests/data/leaf.pem") & text("tests/data/inter.pem"),
                                      text("tests/data/leaf.key"))
-    let server = tcp.listen(0, "127.0.0.1")
+    let server = nettcp.listen(0, "127.0.0.1")
     defer: server.close()
     assert trySpawnTask(peer(server, ctx))
     dropped(config, server.port)

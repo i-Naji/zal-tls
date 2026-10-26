@@ -56,11 +56,11 @@ proc server(listener: sink TcpListenerRef; context: sink Context) {.passive.} =
       if context.stayOpen:
         context.code = recvInto(connection, payload, afterMs(5000))
         assert context.code < 0, "terminal close interrupts the peer"
-        discard close(connection, afterMs(5000))
+        discard retire(connection, afterMs(5000))
       else:
-        assert shutdownWrite(connection) == 0, "ttlsref check 37"
+        assert halfClose(connection) == 0, "ttlsref check 37"
       if not context.abandonAfterShutdown and not context.stayOpen:
-        discard close(connection, afterMs(5000))
+        discard retire(connection, afterMs(5000))
     else: assert false, "ttlsref check 40"
   else: assert false, "ttlsref check 41"
   setEvent(addr context.done)
@@ -133,25 +133,25 @@ proc exchange(clientCfg: ClientConfigRef; abandon: bool; stayOpen = false; mode 
           assert recvInto(connection, payload) == ResourceBusy, "pending reader holds read admission"
           assert closeNow(connection) == ResourceBusy and nativeHandle(connection) == handle,
             "pending read rejects immediate disposal and preserves the descriptor"
-          let closing = close(connection, afterMs(0))
+          let closing = retire(connection, afterMs(0))
           assert closing == 0 or closing == IoTimedOut
           if closing == IoTimedOut:
             let phase = state(connection)
             assert phase == ownerClosing or phase == ownerClosed,
               "close timeout ends the wait; retained cleanup may already finish"
-          assert close(connection, afterMs(5000)) == 0
+          assert retire(connection, afterMs(5000)) == 0
           assert wait(addr readDone, afterMs(5000)) == wrReady and readCode == ResourceClosed
         else:
           assert recvInto(connection, payload, afterMs(5000)) == 0, "ttlsref check 109"
-        assert close(connection, afterMs(5000)) == 0, "ttlsref check 110"
-        assert state(connection) == ownerClosed and close(connection) == 0, "ttlsref check 111"
+        assert retire(connection, afterMs(5000)) == 0, "ttlsref check 110"
+        assert state(connection) == ownerClosed and retire(connection) == 0, "ttlsref check 111"
         assert sendFrom(connection, payload) == ResourceClosed, "ttlsref check 112"
         let heldTcp = transportHold
         if heldTcp != nil: assert state(heldTcp) == ownerClosed
       else: assert false, "ttlsref check 113"
     assert wait(addr context.done, afterMs(5000)) == wrReady, "ttlsref check 114"
     assert context.config == nil, "ttlsref check 115"
-    assert close(listener) == 0, "ttlsref check 116"
+    assert retire(listener) == 0, "ttlsref check 116"
   else: assert false, "ttlsref check 117"
   yieldNow()
 

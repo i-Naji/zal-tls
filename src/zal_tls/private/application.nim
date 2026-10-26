@@ -169,13 +169,10 @@ template write*(stream: TlsStream; buffer: openArray[byte];
     checkTls(outcome.error)
 
 template close*(stream: TlsStream; deadline: Deadline = never) =
-  checkTls(owners.close(stream, deadline))
+  checkTls(owners.retire(stream, deadline))
 
-proc shutdownWrite*(stream: TlsStream) {.raises.} = checkTls(owners.shutdownWrite(stream))
-proc lastReadFailure*(stream: TlsStream): IoFailure {.inline.} = owners.lastReadFailure(stream)
-proc lastWriteFailure*(stream: TlsStream): IoFailure {.inline.} = owners.lastWriteFailure(stream)
-proc deadline*(stream: TlsStream): Deadline {.inline.} = owners.deadline(stream)
-proc renew*(stream: TlsStream; deadline: Deadline) {.inline.} = owners.renew(stream, deadline)
+proc shutdownWrite*(stream: TlsStream) {.raises.} = checkTls(owners.halfClose(stream))
+export owners.lastReadFailure, owners.lastWriteFailure, owners.deadline, owners.renew
 
 proc negotiatedProtocol*(stream: TlsStream): string {.raises.} =
   ## Empty means no ALPN was selected.

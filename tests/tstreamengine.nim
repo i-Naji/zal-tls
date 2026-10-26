@@ -2,7 +2,7 @@
 ## then over a socket through the std stream.
 import std/[assertions, syncio, streamio]
 import zal_net/rt, zal_net/rt/sync
-import zal_net/net/tcp as tcp
+import zal_net/net/tcp as nettcp
 import zal_tls as tls
 import zal_tls/engine
 import zal_tls/record as records
@@ -264,9 +264,9 @@ type Context = ref object
   failure: ErrorCode
   got: int
 
-proc serve(listener: sink tcp.TcpListener; ctx: sink Context) {.passive.} =
+proc serve(listener: sink nettcp.TcpListener; ctx: sink Context) {.passive.} =
   try:
-    var underlying: nil tcp.TcpStream = listener.accept(deadline=afterMs(5000))
+    var underlying: nil nettcp.TcpStream = listener.accept(deadline=afterMs(5000))
     let config = ctx.config
     if config == nil:
       assert false
@@ -287,7 +287,7 @@ proc serve(listener: sink tcp.TcpListener; ctx: sink Context) {.passive.} =
 proc socket(client: tls.ClientConfig; config: tls.ServerConfig) {.passive, raises.} =
   let ctx = Context()
   ctx.config = config
-  let listener = tcp.listen(0, "127.0.0.1")
+  let listener = nettcp.listen(0, "127.0.0.1")
   defer: listener.close()
   assert trySpawnTask(serve(listener, ctx))
   let e = newTlsEngine(client, "test.example")

@@ -4,5 +4,5 @@ import zal_tls/foundation/stream
 template withTls*(owner: TlsConnRef; body: untyped) =
   block:
     let held = owner
-    defer: discard close(held)
+    defer: discard retire(held)
     body

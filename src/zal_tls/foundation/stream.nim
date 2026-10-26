@@ -354,7 +354,7 @@ template sendFrom*(owner: TlsConnRef; bytes: openArray[byte]; deadline: Deadline
                    tok: nil CancelToken = nil): int =
   sendFrom(owner, dataPtr(bytes), bytes.len, deadline, tok)
 
-proc shutdownWrite*(owner: TlsConnRef): int =
+proc halfClose*(owner: TlsConnRef): int =
   result = beginControl(owner.life)
   if result != 0: return
   shutdownWrite(rawStream(owner))
@@ -396,7 +396,7 @@ proc startClose(owner: TlsConnRef): int =
     interrupt(rawStream(owner))
     disposeRejectedClose(owner)
 
-template close*(owner: TlsConnRef; deadline: Deadline = never): int =
+template retire*(owner: TlsConnRef; deadline: Deadline = never): int =
   block:
     let held = owner
     var code = startClose(held)

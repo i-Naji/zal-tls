@@ -18,9 +18,9 @@ proc write(context: pointer; p: pointer; n: int; deadline: Deadline;
   let held = connection(context)
   result = sendFrom(held, p, n, deadline, tok)
 
-proc halfClose(context: pointer) {.nimcall.} =
+proc halfCloseView(context: pointer) {.nimcall.} =
   let held = connection(context)
-  discard shutdownWrite(held)
+  discard halfClose(held)
 
 proc abort(context: pointer) {.nimcall.} =
   let held = connection(context)
@@ -28,13 +28,13 @@ proc abort(context: pointer) {.nimcall.} =
 
 proc closeView(context: pointer): int {.nimcall, passive.} =
   let held = connection(context)
-  result = close(held)
+  result = retire(held)
 
 proc dispose(context: pointer): int {.nimcall.} =
   let held = connection(context)
   result = closeNow(held)
 
-let operations = StreamOps(recv: read, send: write, shutdownWrite: halfClose,
+let operations = StreamOps(recv: read, send: write, shutdownWrite: halfCloseView,
                           interrupt: abort)
 
 

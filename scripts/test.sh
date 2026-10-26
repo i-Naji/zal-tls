@@ -6,6 +6,8 @@ NIMONY=${NIMONY:-nimony}
 WORKERS=${WORKERS:-"1"}
 BUILD_DIR=${BUILD_DIR:-build/test}
 ZAL_NET_DIR=${ZAL_NET_DIR:-../zal-net}
+# The compiler builds zal-net's plugins in their own directory: give it a path that stays valid there.
+ZAL_NET_DIR=$(CDPATH= cd -- "$ZAL_NET_DIR" && pwd)
 AWSLC=${AWSLC:-build/aws-lc/install}
 set -- --path:src --path:"$ZAL_NET_DIR/src" --passC:"-I$AWSLC/include" --passL:"$AWSLC/lib/libcrypto.a" ${NIMFLAGS:-}
 if [ "$(uname)" = Linux ]; then set -- "$@" --passL:-lpthread; fi

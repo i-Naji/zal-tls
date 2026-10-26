@@ -2,7 +2,7 @@
 import std/[assertions, syncio]
 import zal_net/rt, zal_net/rt/sync
 import zal_net/rt/cancel as cancellation
-import zal_net/net/tcp as tcp
+import zal_net/net/tcp as nettcp
 import zal_net/net/[tcpview, transport]
 import zal_tls as tls
 
@@ -25,9 +25,9 @@ proc countedToken(calls: var int; token: CancelToken): CancelToken =
   inc calls
   token
 
-proc echoPeer(server: sink tcp.TcpListener; ctx: sink Context) {.passive.} =
+proc echoPeer(server: sink nettcp.TcpListener; ctx: sink Context) {.passive.} =
   try:
-    var underlying: nil tcp.TcpStream = server.accept(deadline=afterMs(5000))
+    var underlying: nil nettcp.TcpStream = server.accept(deadline=afterMs(5000))
     let config = ctx.config
     if config == nil:
       assert false
@@ -70,16 +70,16 @@ proc exchange(config: tls.ClientConfig; mode: int) {.passive, raises.} =
   let ctx = Context()
   ctx.config = tls.newServerConfig(text("tests/data/leaf.pem") & text("tests/data/inter.pem"),
                                    text("tests/data/leaf.key"), alpn = @["http/1.1"])
-  let server = tcp.listen(0, "127.0.0.1")
+  let server = nettcp.listen(0, "127.0.0.1")
   defer: server.close()
   assert trySpawnTask(echoPeer(server, ctx))
   var stream: nil tls.TlsStream = nil
-  var underlying: nil tcp.TcpStream = nil
+  var underlying: nil nettcp.TcpStream = nil
   if mode == 0:
     stream = tls.connect(config, "127.0.0.1", server.port,
                          serverName="test.example", deadline=afterMs(5000))
   else:
-    underlying = tcp.connect("127.0.0.1", server.port, deadline=afterMs(5000))
+    underlying = nettcp.connect("127.0.0.1", server.port, deadline=afterMs(5000))
     let retained = underlying
     if retained == nil:
       assert false
@@ -173,10 +173,10 @@ proc rejectName(config: tls.ClientConfig) {.passive, raises.} =
   let ctx = Context()
   ctx.config = tls.newServerConfig(text("tests/data/leaf.pem") & text("tests/data/inter.pem"),
                                  text("tests/data/leaf.key"), alpn = @["http/1.1"])
-  let server = tcp.listen(0, "127.0.0.1")
+  let server = nettcp.listen(0, "127.0.0.1")
   defer: server.close()
   assert trySpawnTask(echoPeer(server, ctx))
-  var underlying: nil tcp.TcpStream = tcp.connect("127.0.0.1", server.port)
+  var underlying: nil nettcp.TcpStream = nettcp.connect("127.0.0.1", server.port)
   try:
     discard tls.wrapOwned(config, underlying, "wrong.example", deadline=afterMs(5000))
     assert false
