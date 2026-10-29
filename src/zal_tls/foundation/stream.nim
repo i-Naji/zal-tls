@@ -46,6 +46,9 @@ proc `=destroy`(owner: var TlsConnObj) =
   when not defined(release):
     if owner.counted: discard atomicFetchSub(liveOwners, 1, moRelaxed)
 
+proc `=wasMoved`(owner: var TlsConnObj) {.nodestroy, inline.} =
+  zeroMem(addr owner, sizeof(owner))
+
 proc newOwner(): TlsConnRef =
   result = TlsConnRef()
   when not defined(release):

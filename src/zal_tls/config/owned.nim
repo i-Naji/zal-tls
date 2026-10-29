@@ -38,9 +38,15 @@ proc `=destroy`(owner: var ClientConfigObj) =
   owner.trust = nil
   owner.cfg = default(ClientConfig)
 
+proc `=wasMoved`(owner: var ClientConfigObj) {.nodestroy, inline.} =
+  zeroMem(addr owner, sizeof(owner))
+
 proc `=destroy`(owner: var ServerConfigObj) =
   release(owner.certificate)
   owner.cfg = default(ServerConfig)
+
+proc `=wasMoved`(owner: var ServerConfigObj) {.nodestroy, inline.} =
+  zeroMem(addr owner, sizeof(owner))
 
 proc pemTrust*(pem: string): TrustSource =
   TrustSource(kind: trustPemKind, pem: pem)

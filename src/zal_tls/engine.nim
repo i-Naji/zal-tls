@@ -43,6 +43,9 @@ proc `=destroy`(o: var Conn) =
   records.release(addr o.c)
   if o.inb.len > 0: wipeBytes(addr o.inb[0], o.inb.len)
 
+proc `=wasMoved`(o: var Conn) {.nodestroy, inline.} =
+  zeroMem(addr o, sizeof(o))
+
 proc addBytes(dest: var string; src: pointer; n: int) =
   if n > 0:
     let old = dest.len
