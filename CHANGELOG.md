@@ -19,3 +19,4 @@
 - Use the zal-net checkpoint for Nimony `c923e3c9`.
 - TLS owners close with `retire` and half-close with `halfClose`; `close` and `shutdownWrite` are the raising forms of the TLS stream.
 - scripts/test.sh and scripts/test.ps1 pass zal-net to the compiler as an absolute path.
+- Use the zal-net checkpoint for Nimony `0da5a6b7`; the tests import net/tcp as `tcp` again.
