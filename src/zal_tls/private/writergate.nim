@@ -25,7 +25,7 @@ proc waitWriter*(gate: ptr WriterGate; deadline: Deadline;
 proc takeWriter*(gate: ptr WriterGate; deadline: Deadline;
                  tok: nil CancelToken = nil): bool {.passive, sync.} =
   {.cast(assumeSync).}:
-    while not cancelled(tok) and not stopping() and monoNow() < deadline:
+    while not cancelled(tok) and not stopping() and not expired(deadline):
       if tryTakeWriter(gate): return true
       # A release between the failed claim and this wait remains observable.
       # A stale permit only causes a retry; it never grants writer admission.

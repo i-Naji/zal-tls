@@ -577,7 +577,7 @@ proc recvInto*(s: TlsStreamPtr; p: pointer; n: int; deadline = never;
   defer: release(tok)
   ioCheckpoint(min(n, MaxPlaintext))
   if not s.initialized: return ResourceClosed
-  if deadline <= monoNow(): return IoTimedOut
+  if expired(deadline): return IoTimedOut
   if cancelled(tok): return ECancelled
   if s.earlyAt < s.early.len:                   # 0-RTT first, never with later bytes in one read
     let k = min(n, s.early.len - s.earlyAt)
@@ -587,7 +587,7 @@ proc recvInto*(s: TlsStreamPtr; p: pointer; n: int; deadline = never;
     return k
   while true:
     ioCheckpoint(0)
-    if deadline <= monoNow(): return IoTimedOut
+    if expired(deadline): return IoTimedOut
     if cancelled(tok) or stopping(): return ECancelled
     if s.pendLen > 0:
       let k = min(n, s.pendLen)
@@ -706,7 +706,7 @@ proc sendFrom*(s: TlsStreamPtr; p: pointer; n: int; deadline = never;
   if not s.initialized: return ResourceClosed
   if failureCode(s) != 0: return failureCode(s)
   if cancelled(tok) or stopping(): return ECancelled
-  if deadline <= monoNow(): return IoTimedOut
+  if expired(deadline): return IoTimedOut
   if not takeWriter(addr s.writer, deadline, tok): return (if cancelled(tok): ECancelled else: IoTimedOut)
   if lockedState(s, writeClosed(s.conn)):                            # shut down while we waited for the writer
     giveWriter(s)
