@@ -30,7 +30,7 @@ fi
 fail=0
 prune_case() {
   if [ "${PRUNE_CASE_CACHES:-0}" = 1 ]; then
-    rm -rf "$BUILD_DIR/$be/cache-$name" "$BUILD_DIR/$be/c-cache-$name"
+    rm -rf "$BUILD_DIR/$be/cache-$name"
   fi
 }
 for be in runtime; do
@@ -42,7 +42,7 @@ for be in runtime; do
   for src in $srcs; do
     name=$(basename "$src" .nim)
     out="$BUILD_DIR/$be/$name"
-    if ! XDG_CACHE_HOME="$BUILD_DIR/$be/c-cache-$name" "$NIMONY" c --ff $flag "$@" --nimcache:"$BUILD_DIR/$be/cache-$name" -o:"$out" "$src" >"$out.log" 2>&1; then
+    if ! XDG_CACHE_HOME="$BUILD_DIR/$be/c-cache" "$NIMONY" c --ff $flag "$@" --nimcache:"$BUILD_DIR/$be/cache-$name" -o:"$out" "$src" >"$out.log" 2>&1; then
       echo "FAIL build $be $name (see $out.log)"; tail -40 "$out.log"; fail=1; continue
     fi
     case "$src" in examples/*) echo "ok   build $be $name"; prune_case; continue;; esac
