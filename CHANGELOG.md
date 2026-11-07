@@ -22,3 +22,4 @@
 - Use the zal-net checkpoint for Nimony `0da5a6b7`; the tests import net/tcp as `tcp` again.
 - Use the zal-net checkpoint for Nimony `941d128a`.
 - Use the zal-net checkpoint for Nimony `288097b1`.
+- Use the zal-net checkpoint for Nimony `ee549766`.
