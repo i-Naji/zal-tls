@@ -46,10 +46,13 @@ proc `=destroy`(o: var Conn) =
 proc `=wasMoved`(o: var Conn) {.nodestroy, inline.} =
   zeroMem(addr o, sizeof(o))
 
-proc addBytes(dest: var string; src: pointer; n: int) =
+proc addBytes(dest: var string; src: pointer; n: int): bool =
+  result = true
   if n > 0:
     let old = dest.len
-    copyMem(beginStore(dest, old + n, old), src, n)
+    let p = beginStore(dest, old + n, old)
+    if p == nil: return false
+    copyMem(p, src, n)
     endStore(dest)
 
 proc newTlsEngine*(config: ClientConfigRef; serverName = ""; pendingLimit = 0): ZalTlsEngine {.raises.} =
@@ -66,7 +69,7 @@ proc newTlsEngine*(config: ClientConfigRef; serverName = ""; pendingLimit = 0): 
                failed: false, alert: 0, reason: "")
 
 proc put(e: ZalTlsEngine; n: int) {.inline.} =
-  if n > 0: e.sealed.addBytes(addr e.outb[0], n)
+  if not e.sealed.addBytes(addr e.outb[0], n): e.failed = true
 
 proc control(e: ZalTlsEngine) =
   # What the connection owes before any application data: a key update the
@@ -86,9 +89,12 @@ proc drive(e: ZalTlsEngine) {.raises.} =
     let st = records.step(addr e.conn.c, at(bytesOf(e.conn.inb), e.conn.head), e.conn.tail - e.conn.head,
                           bytesOf(e.outb), e.outb.len, r)
     put(e, r.outLen)
+    if e.failed: raise OutOfMemError
     case st
     of stAppData, stEarlyData:
-      if r.len > 0: e.app.addBytes(addr e.conn.inb[e.conn.head + r.off], r.len)
+      if not e.app.addBytes(addr e.conn.inb[e.conn.head + r.off], r.len):
+        e.failed = true
+        raise OutOfMemError
     of stReady: e.ready = true
     of stPeerClosed, stClosed: e.peerClosed = true
     of stFailed:
@@ -160,6 +166,9 @@ method appIn*(e: ZalTlsEngine; src: openArray[char]; used: var int) {.raises.} =
       let start = e.sealed.len
       let size = RecordOverhead + n
       let output = cast[Bytes](beginStore(e.sealed, start + size, start))
+      if output == nil:
+        e.failed = true
+        raise OutOfMemError
       copyMem(addr output[RecordHeaderLen], addr src[used], n)
       let m = records.sealApp(addr e.conn.c, output, 0, n)
       if m == 0:
