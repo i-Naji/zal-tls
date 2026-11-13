@@ -25,3 +25,4 @@
 - Use the zal-net checkpoint for Nimony `ee549766`.
 - Use the zal-net checkpoint for Nimony `abeb5082`.
 - Use the zal-net checkpoint for Nimony `4ba90a78`.
+- A writer no longer retries forever when a key update is owed on a failed or closed connection.

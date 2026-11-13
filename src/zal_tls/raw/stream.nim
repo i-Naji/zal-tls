@@ -721,7 +721,15 @@ proc sendFrom*(s: TlsStreamPtr; p: pointer; n: int; deadline = never;
     result = owedRecords(s, deadline, tok)
     if result != 0: break
     let m = sealApplication(s, p, k)
-    if m < 0: continue # A reader queued control work before this transition.
+    if m < 0:
+      # A reader queued control work before this transition. None can be
+      # sealed once the connection has failed or closed for writing.
+      result = failureCode(s)
+      if result != 0: break
+      if lockedState(s, writeClosed(s.conn)):
+        result = TlsClosed
+        break
+      continue
     if m == 0:
       result = TlsClosed
     else:
