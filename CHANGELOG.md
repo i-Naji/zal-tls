@@ -24,3 +24,4 @@
 - Use the zal-net checkpoint for Nimony `288097b1`.
 - Use the zal-net checkpoint for Nimony `ee549766`.
 - Use the zal-net checkpoint for Nimony `abeb5082`.
+- Use the zal-net checkpoint for Nimony `4ba90a78`.
