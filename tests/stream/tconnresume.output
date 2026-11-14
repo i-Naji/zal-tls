@@ -1,0 +1,1 @@
+PASS resumption and 0-RTT on a Conn: a ticket stored, resumed, the request as 0-RTT, refused 0-RTT sent once

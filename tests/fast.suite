@@ -5,8 +5,8 @@ crypto/thash
 config/tconfig
 wire/trecordapi
 handshake/thandshake
-stream/ttlsref
-stream/tapplicationtls
+stream/tconn
+stream/texchange
 crypto/tcryptobounds
 stream/twritergate
 stream/tstreamengine

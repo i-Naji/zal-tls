@@ -1,0 +1,1 @@
+PASS a secured Conn ends through its token, a parent token, or a token cancelled before the handshake
