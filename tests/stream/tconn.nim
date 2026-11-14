@@ -9,6 +9,7 @@ type Shared = ref object
   lines: int
   protocol: string
   sawEnd: bool
+  failure: ErrorCode
 
 proc text(path: string): string =
   try: result = readFile(path)
@@ -48,11 +49,21 @@ proc readToEnd(listener: ptr Listener; shared: Shared) {.passive.} =
     echo "server: ", error
   setEvent(addr shared.done)
 
+proc refuse(listener: ptr Listener; shared: Shared) {.passive.} =
+  ## The server's half of a handshake the client refuses.
+  try:
+    var c = accept(listener[], afterMs(5000))
+    c.secure(shared.config, afterMs(5000))
+  except ErrorCode as error:
+    shared.failure = error
+  setEvent(addr shared.done)
+
 proc reset(shared: Shared) =
   clearEvent(addr shared.done)
   shared.lines = 0
   shared.sawEnd = false
   shared.protocol = ""
+  shared.failure = Success
 
 proc sayAndDrop(config: ClientConfig; port: uint16) {.passive, raises.} =
   var gone = connect(config, "127.0.0.1", port, "test.example", afterMs(5000))
@@ -107,12 +118,16 @@ proc main() {.passive.} =
     assert wait(addr shared.done, afterMs(2000)) == wrReady
     assert shared.lines == 1 and shared.sawEnd
 
-    # The wrong name fails the handshake and closes the connection.
-    var failed = false
+    # The wrong name fails the handshake on both sides and closes the connection.
+    reset shared
+    assert trySpawnTask(refuse(addr listener, shared))
+    var failure = Success
     var d = connect("127.0.0.1", listener.port, afterMs(5000))
-    try: d.secure(clientConfig, "other.example", afterMs(500))
-    except ErrorCode: failed = true
-    assert failed and not d.isOpen
+    try: d.secure(clientConfig, "other.example", afterMs(5000))
+    except ErrorCode as error: failure = error
+    assert failure == ProtocolError and not d.isOpen
+    assert wait(addr shared.done, afterMs(5000)) == wrReady
+    assert shared.failure == ProtocolError
     close listener
     echo "PASS TLS on a Conn: lines both ways, close_notify, TLS inside TLS, ALPN, a dropped peer, a refused name"
   except ErrorCode as error:
