@@ -50,7 +50,7 @@ var gOrigTlsFailed = 0       ## originator connections whose handshake failed
 # [length:2][16 zero bytes][payload xor 0x5A][16 bytes: the length's low byte].
 # TLS to it and back is relaid out (one copy per batch). The plain echo
 # server sends the records back as they are.
-proc toyOpen(c: Conn; d: DirectionPtr): int =
+proc toyOpen(c: Relay; d: DirectionPtr): int =
   d.nspans = 0
   d.bytes = 0
   while d.nspans < MaxSpans:
@@ -69,7 +69,7 @@ proc toyOpen(c: Conn; d: DirectionPtr): int =
 
 proc toyBoundary(d: DirectionPtr): bool = true
 
-proc toySeal(c: Conn; d: DirectionPtr): bool =
+proc toySeal(c: Relay; d: DirectionPtr): bool =
   var i = 0
   while i < d.nspans:
     let off = d.spans[i].off
@@ -95,10 +95,10 @@ var gEnds: int
 var gLastEnd = ord(erEof)
 var gEchoActive: int
 
-proc hookEnd(c: Conn) =
+proc hookEnd(c: Relay) =
   atomicStore(gLastEnd, ord(c.endReason), moRelease)
   discard atomicFetchAdd(gEnds, 1, moRelease)
-var gHooks = ConnHooks(onBatch: nil, onEnd: hookEnd)
+var gHooks = RelayHooks(onBatch: nil, onEnd: hookEnd)
 
 proc pattern(i: int): byte {.inline.} = byte((i * 29 + (i shr 10)) and 0xff)
 
@@ -128,7 +128,7 @@ proc echoPlain(s: TcpStreamPtr): int {.passive.} =
 # ------------------------------------------------------------- terminator
 
 proc termConn(fd: cint) {.passive.} =
-  let c = newConn(5000)
+  let c = newRelay(5000)
   if c == nil:
     lingerRst(fd)
     return
@@ -139,10 +139,10 @@ proc termConn(fd: cint) {.passive.} =
   tlsAccept(c, addr gServer, t, ok)
   let tt = t
   if not ok or tt == nil:
-    failConn(c, "tls")
+    failRelay(c, "tls")
     return
   if gResetTerm:
-    failConn(c, "reset on purpose")              # frees the TLS side (tlsAccept put it on c)
+    failRelay(c, "reset on purpose")              # frees the TLS side (tlsAccept put it on c)
     return
   if resumed(tt): gTermResumed = gTermResumed + 1
   gTermClientLeaf = peerLeafDer(tt).len
@@ -156,14 +156,14 @@ proc termConn(fd: cint) {.passive.} =
     var hok = false
     tlsReadPlain(c, tt, gHeader, po, pl, hok)
     if not hok:
-      failConn(c, "header")
+      failRelay(c, "header")
       return
     assert ensurePayload(addr c.a)
     for i in 0 ..< gHeader: expect(buf(addr c.a)[po + i] == pattern(i), "the header over TLS")
     restAsSpan(addr c.a, po + gHeader, pl - gHeader)
   dialEndpointInline(gEcho, true, 5000, c.up)
   if c.up < 0:
-    failConn(c, "dial")                          # frees the TLS side too
+    failRelay(c, "dial")                          # frees the TLS side too
     return
   c.a.dst = c.up
   c.b.src = c.up
@@ -175,7 +175,7 @@ proc termConn(fd: cint) {.passive.} =
     var ko = ktlsUser
     useKtls(c, addr c.a, addr c.b, tt, c.fd, ko)
     if ko == ktlsFailed:
-      failConn(c, "ktls")
+      failRelay(c, "ktls")
       return
     if ko == ktlsKernel: gKernelUsed = gKernelUsed + 1
   startPumps(c)
@@ -187,7 +187,7 @@ proc termLoop(fd: cint) {.passive.} =
 # ------------------------------------------------------------- originator
 
 proc origConn(fd: cint) {.passive.} =
-  let c = newConn(5000)
+  let c = newRelay(5000)
   if c == nil:
     lingerRst(fd)
     return
@@ -202,13 +202,13 @@ proc origConn(fd: cint) {.passive.} =
     let ad = addr c.a
     fillTo(c, ad, gFirstSpan, afterMs(5000), res, filled)
     if not filled:
-      failConn(c, "request")
+      failRelay(c, "request")
       return
     restAsSpan(addr c.a, c.a.off, c.a.fill - c.a.off)
     c.a.off = c.a.fill
   dialEndpointInline(gTerm, true, 5000, c.up)
   if c.up < 0:
-    failConn(c, "dial")
+    failRelay(c, "dial")
     return
   var t: TlsSide = nil
   var ok = false
@@ -216,7 +216,7 @@ proc origConn(fd: cint) {.passive.} =
   let tt = t
   if not ok or tt == nil:
     gOrigTlsFailed = gOrigTlsFailed + 1
-    failConn(c, "tls")
+    failRelay(c, "tls")
     return
   expect(setKeyUpdateInterval(tt, gKuEvery), "relay key update interval")
   if resumed(tt): gOrigResumed = gOrigResumed + 1
@@ -226,7 +226,7 @@ proc origConn(fd: cint) {.passive.} =
     var ko = ktlsUser
     useKtls(c, addr c.b, addr c.a, tt, c.up, ko)
     if ko == ktlsFailed:
-      failConn(c, "ktls")
+      failRelay(c, "ktls")
       return
     if ko == ktlsKernel: gKernelUsed = gKernelUsed + 1
   startPumps(c)

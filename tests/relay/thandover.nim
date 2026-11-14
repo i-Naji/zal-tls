@@ -83,7 +83,7 @@ proc sealed(c: var TlsConn; typ: int; payload: seq[byte]): seq[byte] =
   let n = sealRecord(c.wr, bytesOf(result), 0, payload.len, typ, 0)
   expect(n == result.len, "seal")
 
-proc fresh(cn: Conn): DirectionPtr =
+proc fresh(cn: Relay): DirectionPtr =
   result = addr cn.a
   expect(ensurePayload(result), "handover fixture payload")
   result.off = HeadRoom
@@ -92,7 +92,7 @@ proc fresh(cn: Conn): DirectionPtr =
   result.bytes = 0
 
 proc main() =
-  let cn = newConn(5000)
+  let cn = newRelay(5000)
   if cn == nil: quit "no conn"
 
   # 1. 70 small records: 64 become spans, the 6 others stay for user space.

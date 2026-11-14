@@ -57,7 +57,7 @@ for i in 0 ..< 20:
   discard stepInto(t.conn, toSrv, toCli, sink)
 expect(isReady(cli) and isReady(t.conn), "handshake")
 
-let c = newConn(5000)
+let c = newRelay(5000)
 if c == nil: quit "no connection block"
 useTls(addr c.a, addr c.b, t)                  # a: reads the client's records; b: writes to it
 let d = addr c.a
@@ -173,7 +173,7 @@ expect(st == stPeerClosed or st == stClosed, "the client sees our close_notify")
 echo "PASS close_notify both ways"
 
 release(cli)
-freeConn(c)                                    # the framers' close hooks free the traffic block
+freeRelay(c)                                    # the framers' close hooks free the traffic block
 release(ck)
 release(roots)
 release(rootCerts[0])

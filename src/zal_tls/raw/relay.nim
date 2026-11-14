@@ -6,21 +6,21 @@ import zal_net/net/endpointdial
 ## flight stay in place for the framer; 0-RTT a server takes becomes the
 ## direction's first spans (relayed first; `tlsReadPlain` starts with it).
 ## Tickets a client gets are stored through its configuration. On success the TLS framer is on
-## that side's two directions already (so `failConn` frees the TLS state
+## that side's two directions already (so `failRelay` frees the TLS state
 ## too); `useKtls` may hand it to the kernel; `tlsReadPlain` reads a
 ## protocol header first.
 ##
 ## ```nim
 ## proc serveConn(fd: cint; srv: ptr MyServer) {.passive.} =
-##   let c = newConn(srv.timeoutMs)
+##   let c = newRelay(srv.timeoutMs)
 ##   if c == nil: (lingerRst(fd); return)
 ##   c.fd = fd
 ##   var t: TlsSide = nil
 ##   var ok = false
 ##   tlsAccept(c, addr srv.tls, t, ok)
-##   if not ok: (failConn(c, "tls"); return)
+##   if not ok: (failRelay(c, "tls"); return)
 ##   dialEndpointInline(srv.upstream, true, 10_000, c.up)
-##   if c.up < 0: (failConn(c, "upstream"); return)    # frees the TLS side too
+##   if c.up < 0: (failRelay(c, "upstream"); return)    # frees the TLS side too
 ##   c.a.dst = c.up
 ##   c.b.src = c.up
 ##   c.b.dst = c.fd
@@ -49,7 +49,7 @@ proc relayEarlyCap*(): int {.inline.} =
 
 proc dirBuf(d: DirectionPtr): Bytes {.inline.} = buf(d)
 
-template tlsHandshake*(c: Conn; t: TlsTrafficPtr; sock: cint; into: DirectionPtr; ok: var bool) =
+template tlsHandshake*(c: Relay; t: TlsTrafficPtr; sock: cint; into: DirectionPtr; ok: var bool) =
   ## Drive t's handshake on `sock`: its records land in `into` (whose
   ## source it becomes, fresh: nothing buffered); our flights are built in
   ## that buffer's tail, which reads leave alone, and go out in pieces.
@@ -114,11 +114,11 @@ template tlsHandshake*(c: Conn; t: TlsTrafficPtr; sock: cint; into: DirectionPtr
       else:
         break                                  # the peer closed, or data before the handshake ended
 
-template tlsAccept*(c: Conn; cfg: ServerConfigPtr; t: var TlsSide; ok: var bool) =
+template tlsAccept*(c: Relay; cfg: ServerConfigPtr; t: var TlsSide; ok: var bool) =
   ## The server handshake on c.fd: records into c.a (flights from its
   ## buffer's tail). On success `t` is the TLS side, already on c.a (reading) and
   ## c.b (writing); on failure it is nil. Either way the connection is the
-  ## caller's (`failConn` frees the TLS side with it).
+  ## caller's (`failRelay` frees the TLS side with it).
   block:
     ok = false
     t = nil
@@ -130,10 +130,10 @@ template tlsAccept*(c: Conn; cfg: ServerConfigPtr; t: var TlsSide; ok: var bool)
         tlsHandshake(c, taT, c.fd, taIn, ok)
       if ok:
         t = taT
-        useTls(taIn, taOut, taT)              # held by the connection now: failConn frees it
+        useTls(taIn, taOut, taT)              # held by the connection now: failRelay frees it
       else: releaseTraffic(taT)
 
-template tlsConnect*(c: Conn; sock: cint; into, outof: DirectionPtr; cfg: ClientConfigPtr; name: string;
+template tlsConnect*(c: Relay; sock: cint; into, outof: DirectionPtr; cfg: ClientConfigPtr; name: string;
                      t: var TlsSide; ok: var bool) =
   ## The client handshake on `sock` (usually c.up) to `name`: records into
   ## `into` (usually addr c.b, fresh; flights from its buffer's tail), so
@@ -150,7 +150,7 @@ template tlsConnect*(c: Conn; sock: cint; into, outof: DirectionPtr; cfg: Client
         tlsHandshake(c, tcT, sock, tcIn, ok)
       if ok:
         t = tcT
-        useTls(tcIn, tcOut, tcT)              # held by the connection now: failConn frees it
+        useTls(tcIn, tcOut, tcT)              # held by the connection now: failRelay frees it
       else: releaseTraffic(tcT)
 
 type
@@ -158,9 +158,9 @@ type
     ktlsKernel      ## the kernel seals and opens the records
     ktlsUser        ## no kTLS here: the user-space framer goes on (as `useTls`)
     ktlsFailed      ## the records buffered were bad, or the kernel could not take both
-                    ## directions: fail the connection (`failConn`)
+                    ## directions: fail the connection (`failRelay`)
 
-template useKtls*(c: Conn; reader, writer: DirectionPtr; t: TlsTrafficPtr; sock: cint;
+template useKtls*(c: Relay; reader, writer: DirectionPtr; t: TlsTrafficPtr; sock: cint;
                   outcome: var KtlsOutcome) =
   ## After tlsAccept / tlsConnect: hand the TLS side's records to the
   ## kernel (Linux kTLS); `reader` reads that side, `writer` writes it (as
@@ -209,7 +209,7 @@ template useKtls*(c: Conn; reader, writer: DirectionPtr; t: TlsTrafficPtr; sock:
       elif kuRc == KtlsHalfInstalled: outcome = ktlsFailed
     if outcome == ktlsUser: useTls(kuSrc, kuDst, t)
 
-template tlsReadPlain*(c: Conn; t: TlsTrafficPtr; want: int; plainOff, plainLen: var int; ok: var bool) =
+template tlsReadPlain*(c: Relay; t: TlsTrafficPtr; want: int; plainOff, plainLen: var int; ok: var bool) =
   ## After tlsAccept, for a protocol that reads a header over TLS (a
   ## Trojan-style request): open c.a's records until at least `want` bytes
   ## of plaintext lie together at c.a.buf[plainOff ..< plainOff + plainLen]
