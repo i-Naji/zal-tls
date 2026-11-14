@@ -1,3 +1,4 @@
+# Builds zal-net's tools/tester.nim and hands over to it; see that file for the rules.
 param(
   [ValidateSet("fast", "full", "stress", "platform")]
   [string]$Suite = "fast",
@@ -14,70 +15,28 @@ param(
 $ErrorActionPreference = "Continue"
 Set-Location (Join-Path $PSScriptRoot "..")
 # The compiler builds zal-net's plugins in their own directory: give it a path that stays valid there.
-$ZalNetDir = (Resolve-Path $ZalNetDir).Path
+$env:ZAL_NET_DIR = (Resolve-Path $ZalNetDir).Path
+$env:AWSLC = (Resolve-Path $AwsLc).Path
 New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 $BuildDir = (Resolve-Path $BuildDir).Path
-$Workers = @($Workers | ForEach-Object { $_.Split(",") } | Where-Object { $_ })
+$tester = Join-Path $BuildDir "tester.exe"
+$env:LOCALAPPDATA = Join-Path $BuildDir "c-cache"
+& $Nimony c --ff "--nimcache:$BuildDir\cache-tester" "-o:$tester" (Join-Path $env:ZAL_NET_DIR "tools\tester.nim") *> (Join-Path $BuildDir "tester.log")
+if ($LASTEXITCODE -ne 0) { Get-Content (Join-Path $BuildDir "tester.log"); exit 1 }
+$list = @($Workers | ForEach-Object { $_.Split(",") } | Where-Object { $_ }) -join ","
+$a = @("--nimony:$Nimony", "--build:$BuildDir", "--workers:$list", "--timeout:$TimeoutSec")
+if ($Flags) { $Flags.Split(" ") | Where-Object { $_ } | ForEach-Object { $a += "--flag:$_" } }
+if ($Release) { $a += "--flag:-d:release" }
 $Tests = @($Tests | ForEach-Object { $_.Split(",") } | Where-Object { $_ })
-if ($Tests.Count -eq 0 -and $Suite -ne "full") {
-  switch ($Suite) {
-    "fast" { $Tests = @("tbytes", "taead", "thash", "tconfig", "trecordapi", "thandshake", "ttlsref", "tapplicationtls", "tcryptobounds", "twritergate", "tstreamengine") }
-    "stress" { $Tests = @("tmemory", "tfuzz") }
-    "platform" { $Tests = @("tktls", "tktlsbounds", "tkernelsplice", "tkernelrelay") }
-  }
+foreach ($t in $Tests) {
+  # A path, a category/tname, or a bare test name.
+  if (Test-Path $t) { $a += $t; continue }
+  if (Test-Path "tests/$t.nim") { $a += "tests/$t.nim"; continue }
+  $named = @(Get-ChildItem tests -Recurse -Filter "$t.nim")
+  $a += $(if ($named.Count -gt 0) { $named[0].FullName } else { $t })
 }
-foreach ($name in $Tests) {
-  if (-not (Test-Path "tests\$name.nim" -PathType Leaf)) {
-    Write-Output "FAIL missing source tests\$name.nim"
-    exit 1
-  }
+if ($Tests.Count -eq 0) {
+  if ($Suite -eq "full") { $a += "tests", "examples" } else { $a += "--suite:$Suite" }
 }
-$sources = if ($Tests.Count -gt 0) {
-  @($Tests | ForEach-Object { Get-Item "tests\$_.nim" })
-} else {
-  @(Get-ChildItem tests -Filter "t*.nim") + @(Get-ChildItem examples -Filter "*.nim")
-}
-$fail = 0
-foreach ($be in @("runtime")) {
-  $compileArgs = @("--path:src", "--path:$ZalNetDir\src", "--passC:-I$AwsLc\include", "--passL:$AwsLc\lib\libcrypto.a",
-             "--passL:-lws2_32", "--passL:-lbcrypt", "--passL:-ladvapi32")
-  if ($Flags) { $compileArgs += $Flags.Split(" ") }
-  if ($Release) { $compileArgs += "-d:release" }
-  $compileArgs += "--mm:atomicArc", "-d:useMimalloc"
-  New-Item -ItemType Directory -Force -Path "$BuildDir\$be" | Out-Null
-  foreach ($src in $sources) {
-    $name = $src.BaseName
-    $out = "$BuildDir\$be\$name.exe"
-    $previousLocalAppData = $env:LOCALAPPDATA
-    try {
-      $env:LOCALAPPDATA = "$BuildDir\$be\c-cache-$name"
-      New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA | Out-Null
-      & $Nimony c --ff @compileArgs "--nimcache:$BuildDir\$be\cache-$name" "-o:$out" $src.FullName *> "$BuildDir\$be\$name.log"
-      $compileExit = $LASTEXITCODE
-    } finally {
-      $env:LOCALAPPDATA = $previousLocalAppData
-    }
-    if ($compileExit -ne 0) { Write-Output "FAIL build $be $name"; Get-Content "$BuildDir\$be\$name.log" -Tail 40; $fail = 1; continue }
-    if ($src.DirectoryName -like "*examples") { Write-Output "ok   build $be $name"; continue }
-    foreach ($worker in $Workers) {
-      $env:ZAL_WORKERS = "$worker"
-      $output = "$BuildDir\$be\$name.w$worker.out"
-      $process = Start-Process -FilePath $out -NoNewWindow -PassThru -RedirectStandardOutput $output -RedirectStandardError "$output.err"
-      $null = $process.Handle
-      if (-not $process.WaitForExit($TimeoutSec * 1000)) {
-        $process.Kill()
-        $process.WaitForExit()
-        Write-Output "FAIL $be $name workers=$worker (timeout)"
-        $fail = 1
-        Get-Content $output, "$output.err"
-      } elseif ($process.ExitCode -ne 0) {
-        Write-Output "FAIL $be $name workers=$worker"
-        $fail = 1
-        Get-Content $output, "$output.err"
-      } else {
-        Write-Output "ok   $be $name workers=$worker"
-      }
-    }
-  }
-}
-exit $fail
+& $tester @a
+exit $LASTEXITCODE

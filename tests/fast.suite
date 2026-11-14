@@ -1,0 +1,12 @@
+# The quick check before a commit.
+wire/tbytes
+crypto/taead
+crypto/thash
+config/tconfig
+wire/trecordapi
+handshake/thandshake
+stream/ttlsref
+stream/tapplicationtls
+crypto/tcryptobounds
+stream/twritergate
+stream/tstreamengine

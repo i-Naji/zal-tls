@@ -9,6 +9,12 @@ NIMONY=../zal-net/build/toolchain/bin/nimony scripts/test.sh
 NIMONY=../zal-net/build/toolchain/bin/nimony SUITE=full scripts/test.sh
 ```
 
+`scripts/test.sh` builds zal-net's `tools/tester.nim` and runs it; that file
+describes the rules. Tests live in `tests/<category>/t*.nim`.
+`TESTS="tests/stream wire/tbytes"` picks categories or tests, `SUITE=stress`
+runs the heap and fuzz cases, `SUITE=platform` the kTLS cases, `WORKERS="1 4"`
+runs every program at both worker counts.
+
 `AWSLC` selects an existing AWS-LC installation. Windows uses the PowerShell
 setup and test scripts. `scripts/test-ktls.sh` requires native Linux kTLS.
 Generated output stays under ignored `build/` directories.

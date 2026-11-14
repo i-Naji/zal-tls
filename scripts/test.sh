@@ -1,57 +1,42 @@
 #!/bin/sh
-# SUITE=fast|full|stress|platform; TESTS selects individual cases.
+# Builds zal-net's tools/tester.nim and hands over to it; see that file for the rules.
+# SUITE=fast|full|stress|platform, TESTS="tests/stream wire/tbytes tloop", WORKERS="1 4".
+# KEEP=1 keeps every program and its cache under BUILD_DIR.
 set -eu
 cd "$(dirname "$0")/.."
 NIMONY=${NIMONY:-nimony}
-WORKERS=${WORKERS:-"1"}
 BUILD_DIR=${BUILD_DIR:-build/test}
-ZAL_NET_DIR=${ZAL_NET_DIR:-../zal-net}
 # The compiler builds zal-net's plugins in their own directory: give it a path that stays valid there.
-ZAL_NET_DIR=$(CDPATH= cd -- "$ZAL_NET_DIR" && pwd)
-AWSLC=${AWSLC:-build/aws-lc/install}
-set -- --path:src --path:"$ZAL_NET_DIR/src" --passC:"-I$AWSLC/include" --passL:"$AWSLC/lib/libcrypto.a" ${NIMFLAGS:-}
-if [ "$(uname)" = Linux ]; then set -- "$@" --passL:-lpthread; fi
+ZAL_NET_DIR=$(CDPATH= cd -- "${ZAL_NET_DIR:-../zal-net}" && pwd)
+AWSLC=$(CDPATH= cd -- "${AWSLC:-build/aws-lc/install}" && pwd)
+export ZAL_NET_DIR AWSLC
+mkdir -p "$BUILD_DIR"
+BUILD_DIR=$(cd "$BUILD_DIR" && pwd)
+TESTER=$BUILD_DIR/tester
+if [ ! -x "$TESTER" ] || [ "$ZAL_NET_DIR/tools/tester.nim" -nt "$TESTER" ]; then
+  XDG_CACHE_HOME="$BUILD_DIR/c-cache" "$NIMONY" c --ff --nimcache:"$BUILD_DIR/cache-tester" \
+    -o:"$TESTER" "$ZAL_NET_DIR/tools/tester.nim" >"$BUILD_DIR/tester.log" 2>&1 || { cat "$BUILD_DIR/tester.log" >&2; exit 1; }
+fi
+set -- --nimony:"$NIMONY" --build:"$BUILD_DIR" --workers:"${WORKERS:-1}"
+if [ "${KEEP:-0}" = 1 ]; then set -- "$@" --keep; fi
+for flag in ${NIMFLAGS:-}; do set -- "$@" --flag:"$flag"; done
 if [ "${SANITIZE:-0}" = 1 ]; then
   # UBSan otherwise recovers and lets a failing sanitizer run print "ok".
   export UBSAN_OPTIONS=${UBSAN_OPTIONS:-halt_on_error=1}
-  set -- "$@" --passC:-fsanitize=address,undefined --passC:-DMI_TRACK_ASAN=1 --passC:-fno-omit-frame-pointer --passL:-fsanitize=address,undefined
-fi
-mkdir -p "$BUILD_DIR"
-BUILD_DIR=$(cd "$BUILD_DIR" && pwd)
-if [ -z "${TESTS:-${ONLY:-}}" ]; then
-  case "${SUITE:-fast}" in
-    fast) TESTS="tbytes taead thash tconfig trecordapi thandshake ttlsref tapplicationtls tcryptobounds twritergate tstreamengine" ;;
-    full) ;;
-    stress) TESTS="tmemory tfuzz" ;;
-    platform) TESTS="tktls tktlsbounds tkernelsplice tkernelrelay" ;;
-    *) echo "unknown SUITE (fast, full, stress, platform)" >&2; exit 2 ;;
-  esac
-fi
-fail=0
-prune_case() {
-  if [ "${PRUNE_CASE_CACHES:-0}" = 1 ]; then
-    rm -rf "$BUILD_DIR/$be/cache-$name"
-  fi
-}
-for be in runtime; do
-  flag="--mm:atomicArc -d:useMimalloc"
-  mkdir -p "$BUILD_DIR/$be"
-  selected=$(printf '%s' "${TESTS:-${ONLY:-}}" | tr ',' ' ')
-  if [ -n "$selected" ]; then srcs=$(for t in $selected; do printf 'tests/%s.nim ' "$t"; done)
-  else srcs="tests/t*.nim examples/*.nim"; fi
-  for src in $srcs; do
-    name=$(basename "$src" .nim)
-    out="$BUILD_DIR/$be/$name"
-    if ! XDG_CACHE_HOME="$BUILD_DIR/$be/c-cache" "$NIMONY" c --ff $flag "$@" --nimcache:"$BUILD_DIR/$be/cache-$name" -o:"$out" "$src" >"$out.log" 2>&1; then
-      echo "FAIL build $be $name (see $out.log)"; tail -40 "$out.log"; fail=1; continue
-    fi
-    case "$src" in examples/*) echo "ok   build $be $name"; prune_case; continue;; esac
-    case_failed=0
-    for w in $WORKERS; do
-      if ZAL_WORKERS=$w "$out" >"$out.w$w.out" 2>&1; then echo "ok   $be $name workers=$w"
-      else echo "FAIL $be $name workers=$w (see $out.w$w.out)"; cat "$out.w$w.out"; fail=1; case_failed=1; fi
-    done
-    if [ "$case_failed" = 0 ]; then prune_case; fi
+  for flag in --passC:-fsanitize=address,undefined --passC:-DMI_TRACK_ASAN=1 --passC:-fno-omit-frame-pointer --passL:-fsanitize=address,undefined; do
+    set -- "$@" --flag:"$flag"
   done
-done
-exit $fail
+fi
+if [ -n "${TESTS:-}" ]; then
+  # A path, a category/tname, or a bare test name.
+  for t in $(printf '%s' "$TESTS" | tr ',' ' '); do
+    if [ -e "$t" ]; then set -- "$@" "$t"
+    elif [ -e "tests/$t.nim" ]; then set -- "$@" "tests/$t.nim"
+    else set -- "$@" tests/*/"$t".nim; fi
+  done
+  exec "$TESTER" "$@"
+fi
+case "${SUITE:-fast}" in
+  full) exec "$TESTER" "$@" tests examples ;;
+  *) exec "$TESTER" "$@" --suite:"${SUITE:-fast}" ;;
+esac

@@ -1,0 +1,11 @@
+# Flags for every test of this repository. See tools/tester.nim in zal-net.
+--path:src
+--path:$ZAL_NET_DIR/src
+--passC:-I$AWSLC/include
+--passL:$AWSLC/lib/libcrypto.a
+--mm:atomicArc
+-d:useMimalloc
+linux: --passL:-lpthread
+windows: --passL:-lws2_32
+windows: --passL:-lbcrypt
+windows: --passL:-ladvapi32

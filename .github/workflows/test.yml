@@ -42,7 +42,7 @@ jobs:
         run: |
           build/net/scripts/nimony-setup.sh "$PWD/build/toolchain"
           scripts/awslc-setup.sh "$PWD/build/aws-lc"
-          NIMONY=build/toolchain/bin/nimony ZAL_NET_DIR=build/net AWSLC=build/aws-lc/install SUITE=full PRUNE_CASE_CACHES=1 scripts/test.sh
+          NIMONY=build/toolchain/bin/nimony ZAL_NET_DIR=build/net AWSLC=build/aws-lc/install SUITE=full scripts/test.sh
       - name: Build and test on Windows
         if: runner.os == 'Windows'
         shell: bash

@@ -1,0 +1,3 @@
+# Native heap ownership and mutated input.
+handshake/tmemory
+wire/tfuzz
