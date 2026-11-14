@@ -26,3 +26,24 @@
 - Use the zal-net checkpoint for Nimony `abeb5082`.
 - Use the zal-net checkpoint for Nimony `4ba90a78`.
 - A writer no longer retries forever when a key update is owed on a failed or closed connection.
+- `import zal_tls` puts TLS on zal-net's `Conn`: `connect` returns a secured `Conn`, and `secure` secures one that is connected or accepted. The `TlsStream` application type and the `foundation` owner tier are gone.
+- `secure` works on a `Conn` that already has a layer, so TLS runs inside another tunnel or over a layer of the program's own.
+- The result-returning configuration constructors in `config/owned` are `tryNewClientConfig` and `tryNewServerConfig`.
+- The stream tests run on a secured `Conn`; `tests/interop.sh` and its Go peer are removed, because the programs it drove are not in this repository.
+
+### Moving from the old API
+
+| Old | New |
+| --- | --- |
+| `tls.connect(config, host, port, serverName = n, deadline = d)` returning a `TlsStream` | `connect(config, host, port, n, d)` returning a `Conn` |
+| `tls.connect(config, host, port, request, ...)` | `connect(config, host, port, request, ...)` |
+| `wrapOwned(config, tcpStream, ...)`, `wrapBorrowed(config, stream, ...)` | `secure(c, config, serverName, dl)` or `secure(c, serverConfig, dl)` on a `Conn` |
+| `stream.read(buf, deadline = d)`, `stream.write(buf, deadline = d)` | `c.read(buf, d)`, `c.write(buf, d)`, and the rest of the `Conn` operations |
+| `stream.close()`, `stream.shutdownWrite()` | `close c` or the end of its scope; `c.shutdownWrite()` |
+| `deadline(stream)`, `renew(stream, d)` | `renew(c, d)` |
+| `negotiatedProtocol(stream)` | `negotiatedProtocol(c)`; also `isSecure`, `resumed`, `earlyBytes` |
+| `lastReadFailure`, `lastWriteFailure` | the raised `ErrorCode` |
+| a `cancel` token per call | the connection's token, `cancelToken(c)`, or the `stop` token given to `connect` |
+| `zal_tls/foundation` (`TlsConnRef`, `connectTlsConn`, `takeTlsClient`, `borrowTlsServer`, `retire`, `halfClose`), `net/tlsview` (`tlsTransport`), `net/scoped` (`withTls`) | a secured `Conn`, or `TlsStream` from `zal_tls/raw` |
+| `wrapClient`, `wrapServer`, `takeClient`, `takeServer` over a `Transport` in `raw/stream` | `secure` over a layer installed on a `Conn`, or `unsafeWrapClient` and `unsafeWrapServer` over a `StreamView` |
+| `newClientConfig`, `newServerConfig` in `config/owned`, returning a result | `tryNewClientConfig`, `tryNewServerConfig`; the raising pair comes from `zal_tls` |
