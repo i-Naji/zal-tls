@@ -32,6 +32,7 @@ import zal_tls/errors
 
 export secure
 export configs.TrustSource, configs.pemTrust, configs.systemTrust, configs.storeTrust
+export configs.keepSessions, configs.issueTickets
 
 type
   ClientConfig* = configs.ClientConfigRef

@@ -19,9 +19,14 @@ type
   ClientConfigObj = object
     cfg: ClientConfig
     trust: nil Roots                 ## owned independent native reference
+    store: MemoryStore               ## tickets, once `keepSessions` ran
+    keeps: bool
   ServerConfigObj = object
     cfg: ServerConfig
     certificate: CertifiedKey        ## owned, stable resolver target
+    ticketer: KeyedTicketer          ## once `issueTickets` ran
+    replay: MemoryReplay
+    issues: bool
   ClientConfigRef* = ref ClientConfigObj
   ServerConfigRef* = ref ServerConfigObj
   ClientConfigResult* = object
@@ -36,6 +41,7 @@ type
 proc `=destroy`(owner: var ClientConfigObj) =
   release(owner.trust)
   owner.trust = nil
+  if owner.keeps: release(owner.store)
   owner.cfg = default(ClientConfig)
 
 proc `=wasMoved`(owner: var ClientConfigObj) {.nodestroy, inline.} =
@@ -43,6 +49,9 @@ proc `=wasMoved`(owner: var ClientConfigObj) {.nodestroy, inline.} =
 
 proc `=destroy`(owner: var ServerConfigObj) =
   release(owner.certificate)
+  if owner.issues:
+    release(owner.ticketer)
+    release(owner.replay)
   owner.cfg = default(ServerConfig)
 
 proc `=wasMoved`(owner: var ServerConfigObj) {.nodestroy, inline.} =
@@ -122,6 +131,41 @@ proc tryNewServerConfig*(certPem, keyPem: string; alpn: seq[string] = @[]): Serv
   for protocol in alpn: owner.cfg.alpn.add protocol
   result.value = owner
   result.code = 0
+
+proc keepSessions*(owner: ClientConfigRef; earlyData = false) =
+  ## Keep the tickets servers hand out and resume with them, which saves the
+  ## certificate exchange on later connections to the same name. Call it
+  ## before the first connection uses the configuration.
+  ##
+  ## With `earlyData`, the request given to `connect` goes as 0-RTT when a
+  ## ticket allows it. An attacker can replay 0-RTT data, so turn it on only
+  ## where every such request is idempotent.
+  if not owner.keeps:
+    initMemoryStore(owner.store)
+    owner.keeps = true
+    owner.cfg.sessions = memoryStore(addr owner.store)
+  owner.cfg.earlyData = earlyData
+
+proc issueTickets*(owner: ServerConfigRef; maxEarlyData = 0): bool =
+  ## Hand out session tickets and accept them, so returning clients skip the
+  ## certificate exchange. The keys live in this configuration and rotate on
+  ## their own; they are gone when the program ends. Call it before the first
+  ## connection uses the configuration. False when the system gave no
+  ## randomness for the keys, and then nothing changes.
+  ##
+  ## `maxEarlyData` above 0 accepts that many bytes of 0-RTT per ticket. Each
+  ## ticket's early data is taken once, but only by this process: several
+  ## servers behind one name need a shared replay store from `zal_tls/raw`.
+  result = true
+  if not owner.issues:
+    if not initKeyedTicketer(owner.ticketer):
+      release(owner.ticketer)
+      return false
+    initMemoryReplay(owner.replay)
+    owner.issues = true
+    owner.cfg.ticketer = keyedTicketer(addr owner.ticketer)
+    owner.cfg.antiReplay = memoryReplay(addr owner.replay)
+  owner.cfg.maxEarlyData = uint32(max(maxEarlyData, 0))
 
 proc unsafeBorrowConfig*(owner: ClientConfigRef): ClientConfigPtr {.inline.} =
   ## Advanced read-only borrow, valid while owner is retained. Do not change

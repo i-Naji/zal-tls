@@ -2,15 +2,9 @@
 ## ticket while it reads; the next one resumes and sends its request as
 ## 0-RTT, which the server reads first and counts in `earlyBytes`. A server
 ## that takes no 0-RTT still reads the request once, after the handshake.
-##
-## The configurations from `zal_tls` have no session store or ticketer of
-## their own, so the test sets them through `unsafeBorrowConfig`.
 import std/[assertions, syncio]
 import zal_net
 import zal_tls
-import zal_tls/config/owned
-from zal_tls/config/config import KeyedTicketer, initKeyedTicketer, keyedTicketer,
-  MemoryReplay, initMemoryReplay, memoryReplay, MemoryStore, initMemoryStore, memoryStore
 
 type Shared = ref object
   config: ServerConfig
@@ -64,22 +58,11 @@ proc ask(client: ClientConfig; listener: ptr Listener; shared: Shared;
 
 proc main() {.passive.} =
   try:
-    var ticketer = default(KeyedTicketer)
-    var replay = default(MemoryReplay)
-    var store = default(MemoryStore)
-    assert initKeyedTicketer(ticketer)
-    initMemoryReplay(replay)
-    initMemoryStore(store)
     let shared = Shared(config: newServerConfig(text("tests/data/leaf.pem") & text("tests/data/inter.pem"),
                                                 text("tests/data/leaf.key")))
-    let server = unsafeBorrowConfig(shared.config)
-    server.ticketer = keyedTicketer(addr ticketer)
-    server.antiReplay = memoryReplay(addr replay)
-    server.maxEarlyData = 16384
+    assert shared.config.issueTickets(maxEarlyData = 16384)
     let client = newClientConfig(pemTrust(text("tests/data/root.pem")))
-    let settings = unsafeBorrowConfig(client)
-    settings.sessions = memoryStore(addr store)
-    settings.earlyData = true
+    client.keepSessions(earlyData = true)
     var listener = listen(0, "127.0.0.1")
 
     # A full handshake; the ticket arrives while the client reads.
@@ -91,7 +74,7 @@ proc main() {.passive.} =
     assert shared.resumed and shared.early == "GET /early\n".len
 
     # A server that takes no 0-RTT: the request goes after the handshake, once.
-    server.maxEarlyData = 0
+    assert shared.config.issueTickets(maxEarlyData = 0)
     assert ask(client, addr listener, shared, "GET /late", true)
     assert shared.resumed and shared.early == 0
 
