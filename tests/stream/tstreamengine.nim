@@ -1,9 +1,8 @@
 ## zal-tls as a std/streamio engine: in memory against a zal-tls server,
-## then over a socket through the std stream.
+## then over a socket through the std stream, against a secured Conn.
 import std/[assertions, syncio, streamio]
-import zal_net/rt, zal_net/rt/sync
-import zal_net/net/tcp as tcp
-import zal_tls as tls
+import zal_net
+import zal_tls
 import zal_tls/engine
 import zal_tls/record as records
 import zal_tls/config/owned
@@ -27,7 +26,7 @@ type Server = object
   app: string
   ready, peerClosed: bool
 
-proc initServer(config: tls.ServerConfig): Server =
+proc initServer(config: ServerConfig): Server =
   result = Server(c: default(records.TlsConn), inb: newSeq[byte](1 shl 16), inLen: 0,
                   outb: newSeq[byte](1 shl 16), app: "", ready: false, peerClosed: false)
   assert records.initServer(addr result.c, unsafeBorrowConfig(config))
@@ -85,7 +84,7 @@ proc handshake(e: ZalTlsEngine; s: var Server; name: string): bool {.raises.} =
     assert used == back.len
     inc rounds
 
-proc memory(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
+proc memory(client: ClientConfig; config: ServerConfig) {.raises.} =
   var s = initServer(config)
   let e = newTlsEngine(client)
   assert not e.isConnected
@@ -140,7 +139,7 @@ proc memory(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
     assert error == BadOperation
   records.release(addr s.c)
 
-proc bounded(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
+proc bounded(client: ClientConfig; config: ServerConfig) {.raises.} =
   const Limit = 64 * 1024
   for limit in [-1, 1]:
     try:
@@ -222,7 +221,7 @@ proc bounded(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
   assert s.peerClosed
 
 when defined(tlsEngineBench):
-  proc measureOutput(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
+  proc measureOutput(client: ClientConfig; config: ServerConfig) {.raises.} =
     for size in [64, 1024, 4096, 16384, 262144]:
       let payload = pattern(size)
       let rounds = if size > MaxPlaintext: 256 else: 4096
@@ -248,7 +247,7 @@ when defined(tlsEngineBench):
         records.release(addr s.c)
         echo "write_bytes=", size, " rounds=", rounds, " elapsed_ns=", elapsed
 
-proc wrongName(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
+proc wrongName(client: ClientConfig; config: ServerConfig) {.raises.} =
   var s = initServer(config)
   let e = newTlsEngine(client)
   assert not handshake(e, s, "wrong.example")
@@ -259,37 +258,31 @@ proc wrongName(client: tls.ClientConfig; config: tls.ServerConfig) {.raises.} =
 # --------------------------------------------------------------- socket --
 
 type Context = ref object
-  config: nil tls.ServerConfig
+  config: ServerConfig
   done: Event
   failure: ErrorCode
   got: int
 
-proc serve(listener: sink tcp.TcpListener; ctx: sink Context) {.passive.} =
+proc serve(listener: ptr Listener; ctx: Context) {.passive.} =
   try:
-    var underlying: nil tcp.TcpStream = listener.accept(deadline=afterMs(5000))
-    let config = ctx.config
-    if config == nil:
-      assert false
-    else:
-      let stream = tls.wrapOwned(config, underlying, deadline=afterMs(5000))
-      defer: stream.close()
-      var buf = newSeq[byte](16384)
-      while true:
-        let n = stream.read(buf, deadline=afterMs(5000))
-        if n == 0: break
-        stream.write(buf.toOpenArray(0, n - 1), deadline=afterMs(5000))
-        ctx.got += n
-      stream.shutdownWrite()
+    var c = accept(listener[], afterMs(5000))
+    c.renew afterMs(5000)
+    c.secure(ctx.config)
+    var buf = newSeq[byte](16384)
+    while true:
+      let n = c.read(buf)
+      if n == 0: break
+      c.write buf.toOpenArray(0, n - 1)
+      ctx.got += n
+    c.shutdownWrite()
   except ErrorCode as error:
     ctx.failure = error
   setEvent(addr ctx.done)
 
-proc socket(client: tls.ClientConfig; config: tls.ServerConfig) {.passive, raises.} =
-  let ctx = Context()
-  ctx.config = config
-  let listener = tcp.listen(0, "127.0.0.1")
-  defer: listener.close()
-  assert trySpawnTask(serve(listener, ctx))
+proc socket(client: ClientConfig; config: ServerConfig) {.passive, raises.} =
+  let ctx = Context(config: config, failure: Success)
+  var listener = listen(0, "127.0.0.1")
+  assert trySpawnTask(serve(addr listener, ctx))
   let e = newTlsEngine(client, "test.example")
   var (r, w) = connect("127.0.0.1:" & $listener.port, tls = e)
   assert e.alpn == "test"
@@ -312,12 +305,13 @@ proc socket(client: tls.ClientConfig; config: tls.ServerConfig) {.passive, raise
   assert wait(addr ctx.done, afterMs(5000)) == wrReady
   assert ctx.failure == Success
   assert ctx.got == payload.len + 1
+  close listener
 
 proc main() {.passive.} =
   try:
-    let client = tls.newClientConfig(pemTrust(text("tests/data/root.pem")), alpn = @["test"])
-    let config = tls.newServerConfig(text("tests/data/leaf.pem") & text("tests/data/inter.pem"),
-                                     text("tests/data/leaf.key"), alpn = @["test"])
+    let client = newClientConfig(pemTrust(text("tests/data/root.pem")), alpn = @["test"])
+    let config = newServerConfig(text("tests/data/leaf.pem") & text("tests/data/inter.pem"),
+                                 text("tests/data/leaf.key"), alpn = @["test"])
     when defined(tlsEngineBench):
       measureOutput(client, config)
     else:
