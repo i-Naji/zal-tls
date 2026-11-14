@@ -85,7 +85,7 @@ proc ownedTrust(source: TrustSource): nil Roots =
       else: release(store)
     for cert in certs: release(cert)
 
-proc newClientConfig*(trust: TrustSource; alpn: seq[string] = @[]): ClientConfigResult =
+proc tryNewClientConfig*(trust: TrustSource; alpn: seq[string] = @[]): ClientConfigResult =
   result = default(ClientConfigResult)
   result.code = InvalidInput
   if not validAlpn(alpn):
@@ -104,7 +104,7 @@ proc newClientConfig*(trust: TrustSource; alpn: seq[string] = @[]): ClientConfig
   result.value = owner
   result.code = 0
 
-proc newServerConfig*(certPem, keyPem: string; alpn: seq[string] = @[]): ServerConfigResult =
+proc tryNewServerConfig*(certPem, keyPem: string; alpn: seq[string] = @[]): ServerConfigResult =
   result = default(ServerConfigResult)
   result.code = InvalidInput
   if not validAlpn(alpn):

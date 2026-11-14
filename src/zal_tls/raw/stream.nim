@@ -35,7 +35,6 @@ import zal_tls/wire/consts
 import zal_net/rt, zal_net/raw/io, zal_net/rt/[sync, time, cancel, waits]
 import zal_net/raw/tcp
 import zal_net/raw/fdops
-import zal_net/net/transport
 import zal_net/unsafe/streamview
 import zal_net/buffers
 
@@ -53,9 +52,7 @@ type
     stateLock: TicketLock
     initialized: bool
     transport: StreamView
-    transportOwner: nil Transport
     customTransport: bool
-    ownsTransport: bool
     tcp: TcpStream
     conn: TlsConn
     inb: array[InCap, byte]
@@ -152,19 +149,15 @@ proc dropNotify(s: TlsStreamPtr) =
 proc closeNow*(s: TlsStreamPtr): bool =
   ## Quiescent, nonblocking disposal. Caller has finished every borrower.
   ## close_notify goes only if the socket takes it at once. False preserves
-  ## the owner if a writer/flush still uses it or a transferred custom
-  ## transport lacks synchronous disposal.
+  ## the owner if a writer/flush still uses it. A borrowed transport is left
+  ## to its owner.
   if not s.initialized: return true
   if writerActive(s) or flushPending(s): return false
-  if s.customTransport and s.ownsTransport:
-    let owner = s.transportOwner
-    if owner != nil and dispose(owner) != 0: return false
-  elif not s.customTransport:
+  if not s.customTransport:
     dropNotify(s)
     close(addr s.tcp)
   releaseState(s)
   s.transport = default(StreamView)
-  s.transportOwner = nil
   s.initialized = false
   s.background = default(BackgroundLease)
   result = true
@@ -173,14 +166,12 @@ proc isOpen*(s: TlsStream): bool =
   s.initialized and s.failed == 0 and
     (if s.customTransport: isOpen(s.transport) else: s.tcp.isOpen)
 
-# Keep native TCP I/O in the protocol caller's passive frame. Retained and
-# custom transports keep their public callback path.
+# Keep native TCP I/O in the protocol caller's passive frame. A borrowed
+# transport goes through its operation table.
 template readTransport(s: TlsStreamPtr; p: pointer; n: int; deadline: Deadline;
                        tok: nil CancelToken = nil): int =
   block:
-    let owner = s.transportOwner
-    if owner != nil: recvInto(owner, p, n, deadline, tok)
-    elif s.customTransport: recvInto(s.transport, p, n, deadline, tok)
+    if s.customTransport: recvInto(s.transport, p, n, deadline, tok)
     else:
       var transferred = 0
       fdRecvInline(nativeHandle(s.tcp), s.tcp.timeoutMs, p, n, deadline, transferred, tok)
@@ -189,9 +180,7 @@ template readTransport(s: TlsStreamPtr; p: pointer; n: int; deadline: Deadline;
 template writeTransport(s: TlsStreamPtr; p: pointer; n: int; deadline: Deadline;
                         tok: nil CancelToken = nil): int =
   block:
-    let owner = s.transportOwner
-    if owner != nil: sendFrom(owner, p, n, deadline, tok)
-    elif s.customTransport: sendFrom(s.transport, p, n, deadline, tok)
+    if s.customTransport: sendFrom(s.transport, p, n, deadline, tok)
     else:
       var transferred = 0
       fdSendInline(nativeHandle(s.tcp), s.tcp.timeoutMs, p, n, deadline, transferred, tok)
@@ -346,6 +335,23 @@ proc sealApplication(s: TlsStreamPtr; p: pointer; size: int): int =
 proc sendFrom*(s: TlsStreamPtr; p: pointer; n: int; deadline = never;
                tok: nil CancelToken = nil): int {.passive.}
 
+proc clientHandshake(s: TlsStreamPtr; deadline: Deadline; handshakeMs: int;
+                     earlyData: nil pointer; earlyLen: int;
+                     tok: nil CancelToken): int {.passive.} =
+  ## The client handshake, then whatever part of `earlyData` did not go as
+  ## 0-RTT. See `connectTls` for the rules.
+  var sent = 0
+  result = handshake(s, earlier(deadline, afterMs(handshakeMs)), earlyData, earlyLen, sent, tok)
+  let ed = earlyData
+  if result != 0 or ed == nil or earlyLen <= 0: return
+  if s.conn.earlyRejected and s.conn.earlyAlpnChanged: return TlsEarlyNotSent   # (4.2.10)
+  var off = if s.conn.earlyAccepted: sent else: 0  # refused 0-RTT is sent again
+  let src = cast[Bytes](ed)
+  while off < earlyLen:
+    let k = sendFrom(s, addr src[off], earlyLen - off, deadline, tok)
+    if k <= 0: return (if k < 0: k else: fail(s, TlsFailed - alInternalError))
+    off = off + k
+
 proc connectTls*(host: string; port: uint16; cfg: ClientConfigPtr; s: TlsStreamPtr;
                  serverName = ""; deadline = never; timeoutMs = 10_000;
                  handshakeMs = DefaultHandshakeMs; earlyData: nil pointer = nil; earlyLen = 0;
@@ -376,17 +382,7 @@ proc connectTls*(host: string; port: uint16; cfg: ClientConfigPtr; s: TlsStreamP
   if connectionCode != 0: return fail(s, connectionCode)
   if not initClient(s.conn, cfg, if serverName.len > 0: serverName else: host):
     return fail(s, TlsFailed - alInternalError)
-  var sent = 0
-  result = handshake(s, earlier(deadline, afterMs(handshakeMs)), earlyData, earlyLen, sent, tok)
-  let ed = earlyData
-  if result != 0 or ed == nil or earlyLen <= 0: return
-  if s.conn.earlyRejected and s.conn.earlyAlpnChanged: return TlsEarlyNotSent   # (4.2.10)
-  var off = if s.conn.earlyAccepted: sent else: 0  # refused 0-RTT is sent again
-  let src = cast[Bytes](ed)
-  while off < earlyLen:
-    let k = sendFrom(s, addr src[off], earlyLen - off, deadline, tok)
-    if k <= 0: return (if k < 0: k else: fail(s, TlsFailed - alInternalError))
-    off = off + k
+  result = clientHandshake(s, deadline, handshakeMs, earlyData, earlyLen, tok)
 
 proc acceptTls*(s: TlsStreamPtr; tcp: TcpStreamPtr; cfg: ServerConfigPtr; deadline = never;
                 handshakeMs = DefaultHandshakeMs; tok: nil CancelToken = nil): int {.passive.} =
@@ -407,9 +403,11 @@ proc acceptTls*(s: TlsStreamPtr; tcp: TcpStreamPtr; cfg: ServerConfigPtr; deadli
 
 proc takeClient*(s: TlsStreamPtr; tcp: TcpStreamPtr; cfg: ClientConfigPtr;
                  serverName: string; deadline = never;
-                 handshakeMs = DefaultHandshakeMs; tok: nil CancelToken = nil): int {.passive.} =
+                 handshakeMs = DefaultHandshakeMs; tok: nil CancelToken = nil;
+                 earlyData: nil pointer = nil; earlyLen = 0): int {.passive.} =
   ## Transfer an already-connected quiescent TCP owner and use direct I/O.
   ## Pre-initialization rejection preserves tcp; started handshakes consume it.
+  ## `earlyData` as for `connectTls`.
   if s.initialized: return ResourceBusy
   if not tcp[].isOpen: return ResourceClosed
   retain(tok)
@@ -418,8 +416,7 @@ proc takeClient*(s: TlsStreamPtr; tcp: TcpStreamPtr; cfg: ClientConfigPtr;
   initState(s)
   s.tcp = takeTcp(tcp)
   if not initClient(s.conn, cfg, serverName): return fail(s, TlsFailed - alInternalError)
-  var sent = 0
-  result = handshake(s, earlier(deadline, afterMs(handshakeMs)), nil, 0, sent, tok)
+  result = clientHandshake(s, deadline, handshakeMs, earlyData, earlyLen, tok)
 
 proc unsafeWrapClient*(s: TlsStreamPtr; underlying: StreamView; cfg: ClientConfigPtr;
                  serverName: string; deadline = never;
@@ -453,66 +450,6 @@ proc unsafeWrapServer*(s: TlsStreamPtr; underlying: StreamView; cfg: ServerConfi
   if not initServer(s.conn, cfg): return fail(s, TlsFailed - alInternalError)
   var sent = 0
   result = handshake(s, earlier(deadline, afterMs(handshakeMs)), nil, 0, sent, tok)
-
-proc wrapClient*(s: TlsStreamPtr; underlying: Transport; cfg: ClientConfigPtr;
-                 serverName: string; deadline = never;
-                 handshakeMs = DefaultHandshakeMs; tok: nil CancelToken = nil): int {.passive.} =
-  if s.initialized: return ResourceBusy
-  if not isOpen(underlying): return ResourceClosed
-  retain(tok)
-  defer: release(tok)
-  if cancelled(tok): return ECancelled
-  initState(s)
-  s.customTransport = true
-  s.transportOwner = underlying
-  s.transport = borrow(underlying)
-  if not initClient(s.conn, cfg, serverName): return fail(s, TlsFailed - alInternalError)
-  var sent = 0
-  result = handshake(s, earlier(deadline, afterMs(handshakeMs)), nil, 0, sent, tok)
-
-proc wrapServer*(s: TlsStreamPtr; underlying: Transport; cfg: ServerConfigPtr;
-                 deadline = never; handshakeMs = DefaultHandshakeMs;
-                 tok: nil CancelToken = nil): int {.passive.} =
-  if s.initialized: return ResourceBusy
-  if not isOpen(underlying): return ResourceClosed
-  retain(tok)
-  defer: release(tok)
-  if cancelled(tok): return ECancelled
-  initState(s)
-  s.customTransport = true
-  s.transportOwner = underlying
-  s.transport = borrow(underlying)
-  if not initServer(s.conn, cfg): return fail(s, TlsFailed - alInternalError)
-  var sent = 0
-  result = handshake(s, earlier(deadline, afterMs(handshakeMs)), nil, 0, sent, tok)
-
-proc takeClient*(s: TlsStreamPtr; underlying: Transport; cfg: ClientConfigPtr;
-                 serverName: string; deadline = never;
-                 handshakeMs = DefaultHandshakeMs; tok: nil CancelToken = nil): int {.passive.} =
-  if s.initialized: return ResourceBusy
-  retain(tok)
-  defer: release(tok)
-  if cancelled(tok): return ECancelled
-  let moved = takeTransport(underlying)
-  let taken = moved.value
-  if taken == nil: return moved.code
-  result = wrapClient(s, taken, cfg, serverName, deadline, handshakeMs, tok)
-  if s.initialized: s.ownsTransport = true
-  else: discard dispose(taken)
-
-proc takeServer*(s: TlsStreamPtr; underlying: Transport; cfg: ServerConfigPtr;
-                 deadline = never; handshakeMs = DefaultHandshakeMs;
-                 tok: nil CancelToken = nil): int {.passive.} =
-  if s.initialized: return ResourceBusy
-  retain(tok)
-  defer: release(tok)
-  if cancelled(tok): return ECancelled
-  let moved = takeTransport(underlying)
-  let taken = moved.value
-  if taken == nil: return moved.code
-  result = wrapServer(s, taken, cfg, deadline, handshakeMs, tok)
-  if s.initialized: s.ownsTransport = true
-  else: discard dispose(taken)
 
 proc kernelRecv(s: TlsStreamPtr; p: pointer; n: int; deadline: Deadline;
                 tok: nil CancelToken = nil): int {.passive.} =
@@ -828,9 +765,6 @@ proc close*(s: TlsStreamPtr) {.passive.} =
     if flushPending(s): yieldNow() # shutdown cancellation is not completion
   releaseState(s)
   if s.customTransport:
-    let owner = s.transportOwner
-    if s.ownsTransport and owner != nil: discard close(owner)
-    s.transportOwner = nil
     s.transport = default(StreamView)
   else:
     close(addr s.tcp)
