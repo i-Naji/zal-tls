@@ -1,1 +1,1 @@
-PASS TLS on a Conn: handshake, lines both ways, close_notify, a refused name
+PASS TLS on a Conn: lines both ways, close_notify, TLS inside TLS, ALPN, a dropped peer, a refused name
