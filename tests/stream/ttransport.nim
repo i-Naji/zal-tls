@@ -1,9 +1,9 @@
 {.feature: "assumeSync".}
 ## TLS on a user transport with deliberately fragmented reads and partial writes.
-## Borrowing leaves the underlying owner open; transfer closes it exactly once.
+## The raw stream borrows the transport: closing TLS leaves it to its owner,
+## which closes it once.
 import std/[syncio, assertions]
 import zal_net/raw
-import zal_net/net/transport
 import zal_net/unsafe/streamview
 import zal_net/rt/cancel
 import zal_tls/raw/stream
@@ -40,12 +40,6 @@ proc endWrite(ctx: pointer) =
 proc stop(ctx: pointer) =
   let owner = cast[ptr SocketOwner](ctx)
   interrupt(addr owner.tcp)
-proc finish(ctx: pointer): int {.passive.} =
-  let owner = cast[ptr SocketOwner](ctx)
-  owner.closes = owner.closes + 1
-  close(addr owner.tcp)
-  result = 0
-
 proc disposeOwner(ctx: pointer): int =
   let owner = cast[ptr SocketOwner](ctx)
   if owner.tcp.isOpen:
@@ -53,33 +47,8 @@ proc disposeOwner(ctx: pointer): int =
     close(addr owner.tcp)
   result = 0
 
-proc transferCheck(ctx: pointer): int = 0
-
 type SocketOwnerRef = ref object
   state: SocketOwner
-
-proc retainedRead(ctx: pointer; buf: pointer; count: int; until: Deadline;
-                  tok: nil CancelToken): int {.passive.} =
-  let owner = cast[SocketOwnerRef](ctx)
-  result = readPart(addr owner.state, buf, count, until, tok)
-proc retainedWrite(ctx: pointer; buf: pointer; count: int; until: Deadline;
-                   tok: nil CancelToken): int {.passive.} =
-  let owner = cast[SocketOwnerRef](ctx)
-  result = writePart(addr owner.state, buf, count, until, tok)
-proc retainedEnd(ctx: pointer) =
-  let owner = cast[SocketOwnerRef](ctx)
-  endWrite(addr owner.state)
-proc retainedStop(ctx: pointer) =
-  let owner = cast[SocketOwnerRef](ctx)
-  stop(addr owner.state)
-proc retainedClose(ctx: pointer): int {.passive.} =
-  let owner = cast[SocketOwnerRef](ctx)
-  result = finish(addr owner.state)
-proc retainedDispose(ctx: pointer): int =
-  let owner = cast[SocketOwnerRef](ctx)
-  result = disposeOwner(addr owner.state)
-var retainedOps = StreamOps(recv: retainedRead, send: retainedWrite,
-                           shutdownWrite: retainedEnd, interrupt: retainedStop)
 
 var ops = StreamOps(recv: readPart, send: writePart, shutdownWrite: endWrite,
                     interrupt: stop)
