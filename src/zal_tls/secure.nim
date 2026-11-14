@@ -125,6 +125,7 @@ proc trySecure*(connection: var netconn.Conn; config: ClientConfigRef; serverNam
   var belowOps: nil StreamOpsPtr = nil
   let below = takeLayer(connection, belowOps, s.innerRelease)
   var code = 0
+  var tcp = default(rawtcp.TcpStream)
   if below != nil and belowOps != nil:
     s.inner = below
     code = unsafeWrapClient(addr s.stream, unsafeBorrowStream(below, belowOps),
@@ -132,7 +133,6 @@ proc trySecure*(connection: var netconn.Conn; config: ClientConfigRef; serverNam
                             budget(connection, dl), tok = cancelToken(connection))
   else:
     var fd = releaseDescriptor(connection)
-    var tcp = default(rawtcp.TcpStream)
     if not adoptTcp(addr tcp, fd, 0):
       releaseLayer(s)
       return neterrors.ResourceClosed
@@ -140,6 +140,9 @@ proc trySecure*(connection: var netconn.Conn; config: ClientConfigRef; serverNam
                       budget(connection, dl), tok = cancelToken(connection),
                       earlyData = earlyData, earlyLen = earlyLen)
   result = finish(s, connection, code)
+  # A handshake refused before it began (a cancelled token) never took the
+  # socket. Close it here, after `finish` has told the token about it.
+  if tcp.isOpen: close(addr tcp)
 
 proc trySecure*(connection: var netconn.Conn; config: ServerConfigRef;
                 dl: Deadline = never): int {.passive.} =
@@ -149,6 +152,7 @@ proc trySecure*(connection: var netconn.Conn; config: ServerConfigRef;
   var belowOps: nil StreamOpsPtr = nil
   let below = takeLayer(connection, belowOps, s.innerRelease)
   var code = 0
+  var tcp = default(rawtcp.TcpStream)
   if below != nil and belowOps != nil:
     s.inner = below
     code = unsafeWrapServer(addr s.stream, unsafeBorrowStream(below, belowOps),
@@ -156,13 +160,15 @@ proc trySecure*(connection: var netconn.Conn; config: ServerConfigRef;
                             budget(connection, dl), tok = cancelToken(connection))
   else:
     var fd = releaseDescriptor(connection)
-    var tcp = default(rawtcp.TcpStream)
     if not adoptTcp(addr tcp, fd, 0):
       releaseLayer(s)
       return neterrors.ResourceClosed
     code = acceptTls(addr s.stream, addr tcp, unsafeBorrowConfig(config),
                      budget(connection, dl), tok = cancelToken(connection))
   result = finish(s, connection, code)
+  # A handshake refused before it began (a cancelled token) never took the
+  # socket. Close it here, after `finish` has told the token about it.
+  if tcp.isOpen: close(addr tcp)
 
 proc secure*(connection: var netconn.Conn; config: ClientConfigRef; serverName: string;
              dl: Deadline = never) {.passive, raises.} =
