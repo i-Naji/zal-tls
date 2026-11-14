@@ -83,8 +83,8 @@ proc sealed(c: var TlsConn; typ: int; payload: seq[byte]): seq[byte] =
   let n = sealRecord(c.wr, bytesOf(result), 0, payload.len, typ, 0)
   expect(n == result.len, "seal")
 
-proc fresh(cn: Relay): DirectionPtr =
-  result = addr cn.a
+proc fresh(r: Relay): DirectionPtr =
+  result = addr r.a
   expect(ensurePayload(result), "handover fixture payload")
   result.off = HeadRoom
   result.fill = HeadRoom
@@ -92,14 +92,14 @@ proc fresh(cn: Relay): DirectionPtr =
   result.bytes = 0
 
 proc main() =
-  let cn = newRelay(5000)
-  if cn == nil: quit "no conn"
+  let r = newRelay(5000)
+  if r == nil: quit "no conn"
 
   # 1. 70 small records: 64 become spans, the 6 others stay for user space.
   block:
     var c = default(TlsConn)
     let t = pair(c)
-    let d = fresh(cn)
+    let d = fresh(r)
     const Records = 70
     for i in 0 ..< Records:
       var p = newSeq[byte](10)
@@ -111,15 +111,15 @@ proc main() =
     var seen = newSeq[int](Records)
     for i in 0 ..< d.nspans:
       for k in 0 ..< d.spans[i].len: seen[int(d.buf[d.spans[i].off + k])] += 1
-    useTls(d, addr cn.b, t)
+    useTls(d, addr r.b, t)
     d.nspans = 0
     d.bytes = 0
-    discard tlsFramer.open(cn, d)
+    discard tlsFramer.open(r, d)
     for i in 0 ..< d.nspans:
       for k in 0 ..< d.spans[i].len: seen[int(d.buf[d.spans[i].off + k])] += 1
     for i in 0 ..< Records: expect(seen[i] == 10, "record " & $i & " delivered once")
     tlsFramer.closeSource(d)
-    sinkState[nil TlsTrafficPtr](addr cn.b)[] = nil
+    sinkState[nil TlsTrafficPtr](addr r.b)[] = nil
     releaseTraffic(t)
     release(c)
   echo "PASS more records than spans: the rest goes to user space, none lost"
@@ -128,7 +128,7 @@ proc main() =
   block:
     var c = default(TlsConn)
     let t = pair(c)
-    let d = fresh(cn)
+    let d = fresh(r)
     let rec = sealed(c, ctApplicationData, @[1'u8, 2, 3])
     copyMem(bufAt(d, d.fill), addr rec[0], 3)
     d.fill = d.fill + 3
@@ -148,7 +148,7 @@ proc main() =
   block:
     var c = default(TlsConn)
     let t = pair(c)
-    let d = fresh(cn)
+    let d = fresh(r)
     var ku = newSeq[byte](64)
     let n = keyUpdate(c, true, bytesOf(ku), ku.len)
     expect(n > 0, "key update")
@@ -165,7 +165,7 @@ proc main() =
   block:
     var c = default(TlsConn)
     let t = pair(c)
-    let d = fresh(cn)
+    let d = fresh(r)
     put(d, sealed(c, ctApplicationData, @[5'u8]))
     var cl = newSeq[byte](64)
     let n = close(c, bytesOf(cl), cl.len)
@@ -182,7 +182,7 @@ proc main() =
   block:
     var c = default(TlsConn)
     let t = pair(c)
-    let d = fresh(cn)
+    let d = fresh(r)
     put(d, sealed(c, ctAlert, @[2'u8, 40]))
     expect(ktlsHandover(d, t) == HandoverFailed and t.conn.failAlert == 40, "a fatal alert fails")
     releaseTraffic(t)
@@ -190,7 +190,7 @@ proc main() =
   block:
     var c = default(TlsConn)
     let t = pair(c)
-    let d = fresh(cn)
+    let d = fresh(r)
     var rec = sealed(c, ctApplicationData, @[1'u8, 2, 3, 4])
     rec[7] = rec[7] xor 1
     put(d, rec)
@@ -200,7 +200,7 @@ proc main() =
   block:
     var c = default(TlsConn)
     let t = pair(c)
-    let d = fresh(cn)
+    let d = fresh(r)
     put(d, sealed(c, ctHandshake, @[24'u8, 0, 0]))           # a KeyUpdate's first bytes...
     put(d, sealed(c, ctApplicationData, @[1'u8]))            # ... cut by data
     expect(ktlsHandover(d, t) == HandoverFailed and t.conn.failAlert == alUnexpectedMessage,

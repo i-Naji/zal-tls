@@ -12,19 +12,19 @@ import zal_net/net/endpointdial
 ##
 ## ```nim
 ## proc serveConn(fd: cint; srv: ptr MyServer) {.passive.} =
-##   let c = newRelay(srv.timeoutMs)
-##   if c == nil: (lingerRst(fd); return)
-##   c.fd = fd
+##   let r = newRelay(srv.timeoutMs)
+##   if r == nil: (lingerRst(fd); return)
+##   r.fd = fd
 ##   var t: TlsSide = nil
 ##   var ok = false
-##   tlsAccept(c, addr srv.tls, t, ok)
-##   if not ok: (failRelay(c, "tls"); return)
-##   dialEndpointInline(srv.upstream, true, 10_000, c.up)
-##   if c.up < 0: (failRelay(c, "upstream"); return)    # frees the TLS side too
-##   c.a.dst = c.up
-##   c.b.src = c.up
-##   c.b.dst = c.fd
-##   startPumps(c)
+##   tlsAccept(r, addr srv.tls, t, ok)
+##   if not ok: (failRelay(r, "tls"); return)
+##   dialEndpointInline(srv.upstream, true, 10_000, r.up)
+##   if r.up < 0: (failRelay(r, "upstream"); return)    # frees the TLS side too
+##   r.a.dst = r.up
+##   r.b.src = r.up
+##   r.b.dst = r.fd
+##   startPumps(r)
 ## ```
 
 import zal_tls/common
@@ -49,7 +49,7 @@ proc relayEarlyCap*(): int {.inline.} =
 
 proc dirBuf(d: DirectionPtr): Bytes {.inline.} = buf(d)
 
-template tlsHandshake*(c: Relay; t: TlsTrafficPtr; sock: cint; into: DirectionPtr; ok: var bool) =
+template tlsHandshake*(r: Relay; t: TlsTrafficPtr; sock: cint; into: DirectionPtr; ok: var bool) =
   ## Drive t's handshake on `sock`: its records land in `into` (whose
   ## source it becomes, fresh: nothing buffered); our flights are built in
   ## that buffer's tail, which reads leave alone, and go out in pieces.
@@ -60,7 +60,7 @@ template tlsHandshake*(c: Relay; t: TlsTrafficPtr; sock: cint; into: DirectionPt
     let hsOutDir = into
     hsIn.src = sock
     let hsOut = BufCap - HsOutRoom
-    let hsDeadline = afterMs(c.timeoutMs)
+    let hsDeadline = afterMs(r.timeoutMs)
     var hsRes = 0
     var hsR = default(StepResult)
     hsIn.nspans = 0
@@ -84,7 +84,7 @@ template tlsHandshake*(c: Relay; t: TlsTrafficPtr; sock: cint; into: DirectionPt
         hsIn.bytes = hsIn.bytes + hsR.len
       elif hsSt == stSend:
         var hsSent = false
-        sendAll(c, sock, bufAt(hsOutDir, hsOut), hsR.outLen, hsRes, hsSent)
+        sendAll(r, sock, bufAt(hsOutDir, hsOut), hsR.outLen, hsRes, hsSent)
         if not hsSent: break
       elif hsSt == stNeedInput:
         if hsIn.off == hsIn.fill and hsIn.nspans == 0:   # (0-RTT spans stay where they are)
@@ -96,7 +96,7 @@ template tlsHandshake*(c: Relay; t: TlsTrafficPtr; sock: cint; into: DirectionPt
         if hsRoom <= 0: break
         let hsN = readSome(hsIn.src, bufAt(hsIn, hsIn.fill), hsRoom)
         if hsN > 0:
-          touchIo(addr c.lastIo)
+          touchIo(addr r.lastIo)
           hsIn.fill = hsIn.fill + hsN
         elif hsN == IoAgain:
           parkPoll(hsIn.src, {evRead}, hsDeadline, hsRes)
@@ -109,35 +109,35 @@ template tlsHandshake*(c: Relay; t: TlsTrafficPtr; sock: cint; into: DirectionPt
       elif hsSt == stFailed:
         if hsR.outLen > 0:
           var hsSent = false
-          sendAll(c, sock, bufAt(hsOutDir, hsOut), hsR.outLen, hsRes, hsSent)
+          sendAll(r, sock, bufAt(hsOutDir, hsOut), hsR.outLen, hsRes, hsSent)
         break
       else:
         break                                  # the peer closed, or data before the handshake ended
 
-template tlsAccept*(c: Relay; cfg: ServerConfigPtr; t: var TlsSide; ok: var bool) =
-  ## The server handshake on c.fd: records into c.a (flights from its
-  ## buffer's tail). On success `t` is the TLS side, already on c.a (reading) and
-  ## c.b (writing); on failure it is nil. Either way the connection is the
+template tlsAccept*(r: Relay; cfg: ServerConfigPtr; t: var TlsSide; ok: var bool) =
+  ## The server handshake on r.fd: records into r.a (flights from its
+  ## buffer's tail). On success `t` is the TLS side, already on r.a (reading) and
+  ## r.b (writing); on failure it is nil. Either way the connection is the
   ## caller's (`failRelay` frees the TLS side with it).
   block:
     ok = false
     t = nil
     let taT = newTraffic()
     if taT != nil:
-      let taIn = addr c.a
-      let taOut = addr c.b
+      let taIn = addr r.a
+      let taOut = addr r.b
       if initServerSide(taT, cfg, uint32(relayEarlyCap())):
-        tlsHandshake(c, taT, c.fd, taIn, ok)
+        tlsHandshake(r, taT, r.fd, taIn, ok)
       if ok:
         t = taT
         useTls(taIn, taOut, taT)              # held by the connection now: failRelay frees it
       else: releaseTraffic(taT)
 
-template tlsConnect*(c: Relay; sock: cint; into, outof: DirectionPtr; cfg: ClientConfigPtr; name: string;
+template tlsConnect*(r: Relay; sock: cint; into, outof: DirectionPtr; cfg: ClientConfigPtr; name: string;
                      t: var TlsSide; ok: var bool) =
-  ## The client handshake on `sock` (usually c.up) to `name`: records into
-  ## `into` (usually addr c.b, fresh; flights from its buffer's tail), so
-  ## what `outof` (usually addr c.a) holds — a request read first — stays. On success `t` is the TLS side, already on
+  ## The client handshake on `sock` (usually r.up) to `name`: records into
+  ## `into` (usually addr r.b, fresh; flights from its buffer's tail), so
+  ## what `outof` (usually addr r.a) holds — a request read first — stays. On success `t` is the TLS side, already on
   ## `into` (reading) and `outof` (writing).
   block:
     ok = false
@@ -147,7 +147,7 @@ template tlsConnect*(c: Relay; sock: cint; into, outof: DirectionPtr; cfg: Clien
       let tcIn = into
       let tcOut = outof
       if initClientSide(tcT, cfg, name):
-        tlsHandshake(c, tcT, sock, tcIn, ok)
+        tlsHandshake(r, tcT, sock, tcIn, ok)
       if ok:
         t = tcT
         useTls(tcIn, tcOut, tcT)              # held by the connection now: failRelay frees it
@@ -160,7 +160,7 @@ type
     ktlsFailed      ## the records buffered were bad, or the kernel could not take both
                     ## directions: fail the connection (`failRelay`)
 
-template useKtls*(c: Relay; reader, writer: DirectionPtr; t: TlsTrafficPtr; sock: cint;
+template useKtls*(r: Relay; reader, writer: DirectionPtr; t: TlsTrafficPtr; sock: cint;
                   outcome: var KtlsOutcome) =
   ## After tlsAccept / tlsConnect: hand the TLS side's records to the
   ## kernel (Linux kTLS); `reader` reads that side, `writer` writes it (as
@@ -174,7 +174,7 @@ template useKtls*(c: Relay; reader, writer: DirectionPtr; t: TlsTrafficPtr; sock
     outcome = ktlsUser
     let kuSrc = reader
     let kuDst = writer
-    let kuDeadline = afterMs(c.timeoutMs)
+    let kuDeadline = afterMs(r.timeoutMs)
     var kuRes = 0
     var kuGo = ktlsAttach(sock) == 0
     while kuGo:
@@ -209,19 +209,19 @@ template useKtls*(c: Relay; reader, writer: DirectionPtr; t: TlsTrafficPtr; sock
       elif kuRc == KtlsHalfInstalled: outcome = ktlsFailed
     if outcome == ktlsUser: useTls(kuSrc, kuDst, t)
 
-template tlsReadPlain*(c: Relay; t: TlsTrafficPtr; want: int; plainOff, plainLen: var int; ok: var bool) =
+template tlsReadPlain*(r: Relay; t: TlsTrafficPtr; want: int; plainOff, plainLen: var int; ok: var bool) =
   ## After tlsAccept, for a protocol that reads a header over TLS (a
-  ## Trojan-style request): open c.a's records until at least `want` bytes
-  ## of plaintext lie together at c.a.buf[plainOff ..< plainOff + plainLen]
+  ## Trojan-style request): open r.a's records until at least `want` bytes
+  ## of plaintext lie together at r.a.buf[plainOff ..< plainOff + plainLen]
   ## (records' payloads are moved together). Parse the header there, then
   ## hand the rest to the relay with `restAsSpan`.
   block:
     ok = false
     plainOff = 0
     plainLen = 0
-    let rpD = addr c.a
+    let rpD = addr r.a
     let rpB = dirBuf(rpD)
-    let rpDeadline = afterMs(c.timeoutMs)
+    let rpDeadline = afterMs(r.timeoutMs)
     var rpEnd = -1
     var rpRes = 0
     # 0-RTT the handshake kept (spans, in order): the start of the plaintext.

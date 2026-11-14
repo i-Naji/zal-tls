@@ -90,7 +90,7 @@ proc sourceTraffic(d: DirectionPtr): TlsTrafficPtr {.inline.} = sourceState[TlsT
 proc sinkTraffic(d: DirectionPtr): TlsTrafficPtr {.inline.} = sinkState[TlsTrafficPtr](d)[]
 proc bufOf(d: DirectionPtr): Bytes {.inline.} = buf(d)
 
-proc tlsOpen(c: Relay; d: DirectionPtr): int =
+proc tlsOpen(r: Relay; d: DirectionPtr): int =
   ## Every complete record in the window, opened in place. >0 spans; 0
   ## more bytes needed; InEof after close_notify; InFail.
   let t = sourceTraffic(d)
@@ -149,7 +149,7 @@ proc tlsBoundary(d: DirectionPtr): bool =
   ## The stream may end here only after close_notify.
   sourceTraffic(d).peerClosed
 
-proc tlsSeal(c: Relay; d: DirectionPtr): bool =
+proc tlsSeal(r: Relay; d: DirectionPtr): bool =
   ## The owed control records into the prefix, then every span sealed in
   ## place into one region (a record shorter than the source's, padding
   ## gone, is moved down to close the gap).
@@ -179,7 +179,7 @@ proc tlsSeal(c: Relay; d: DirectionPtr): bool =
     i = i + 1
   result = true
 
-proc tlsFinish(c: Relay; d: DirectionPtr): bool =
+proc tlsFinish(r: Relay; d: DirectionPtr): bool =
   ## close_notify in the prefix before the half-close.
   let t = sinkTraffic(d)
   let n = close(t.conn, at(ptrOf(d.pre), d.preLen), PreCap - d.preLen)
@@ -219,7 +219,7 @@ const
   KtlsGeometry* = Geometry(head: 0, tail: 0, maxRecord: MaxRecord, headRoom: 0)
   KtlsCheckBytes = 64 shl 20
 
-proc kOpen(c: Relay; d: DirectionPtr): int =
+proc kOpen(r: Relay; d: DirectionPtr): int =
   ## The kernel has opened the records: what is buffered is plaintext.
   let t = sourceTraffic(d)
   d.nspans = 0
@@ -238,7 +238,7 @@ proc kOpen(c: Relay; d: DirectionPtr): int =
 
 const EIoLinux = 5
 
-proc kReadFailed(c: Relay; d: DirectionPtr; err: int): int =
+proc kReadFailed(r: Relay; d: DirectionPtr; err: int): int =
   ## A plain read failed. EIO: a control record is next (the kernel wants
   ## recvmsg): a KeyUpdate gives new kernel keys (and a reply owed),
   ## close_notify the clean end, data that raced in is kept for `open`.
@@ -285,7 +285,7 @@ proc kReadFailed(c: Relay; d: DirectionPtr; err: int): int =
     recordFailure(t.conn, alUnexpectedMessage)
     result = InFail
 
-proc kSeal(c: Relay; d: DirectionPtr): bool =
+proc kSeal(r: Relay; d: DirectionPtr): bool =
   ## The kernel seals: owed or due key updates into the prefix (sent by
   ## kWritePrefix), the spans into one region as they are.
   let t = sinkTraffic(d)
@@ -316,7 +316,7 @@ proc kSeal(c: Relay; d: DirectionPtr): bool =
     i = i + 1
   result = true
 
-proc kWritePrefix(c: Relay; d: DirectionPtr): int =
+proc kWritePrefix(r: Relay; d: DirectionPtr): int =
   ## Each [type, length, bytes] entry of the prefix as its own kernel record;
   ## after our KeyUpdate, the kernel's new send keys.
   let t = sinkTraffic(d)
@@ -332,7 +332,7 @@ proc kWritePrefix(c: Relay; d: DirectionPtr): int =
         return InFail
   result = 1
 
-proc kFinish(c: Relay; d: DirectionPtr): bool =
+proc kFinish(r: Relay; d: DirectionPtr): bool =
   ## close_notify as an alert record before the half-close.
   let t = sinkTraffic(d)
   markWriteClosed(t.conn)
