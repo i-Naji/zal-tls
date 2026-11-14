@@ -85,38 +85,54 @@ proc layerInterrupt(ctx: pointer) {.nimcall.} =
 let tlsOps = StreamOps(recv: layerRecv, send: layerSend,
                        shutdownWrite: layerShutdownWrite, interrupt: layerInterrupt)
 
-proc finish(s: Secured; c: var netconn.Conn; code: int) {.raises.} =
-  if code != 0:
-    # The stream took the socket when the handshake started; closing the
-    # layer closes it. The connection must not close it a second time.
-    install(c, s, unsafeAddr tlsOps)
-    close c
-    checkTls(code)
-    raise ProtocolError
-  discard setBackgroundLease(addr s.stream, BackgroundLease(
-    context: borrowRefContext(s), acquire: acquireBackground, drop: dropBackground))
+proc finish(s: Secured; c: var netconn.Conn; code: int): int =
+  ## Install the layer either way: once the handshake has started the stream
+  ## holds the socket, so the layer is what closes it.
   install(c, s, unsafeAddr tlsOps)
+  result = code
+  if code != 0:
+    close c
+  else:
+    discard setBackgroundLease(addr s.stream, BackgroundLease(
+      context: borrowRefContext(s), acquire: acquireBackground, drop: dropBackground))
 
-proc secure*(connection: var netconn.Conn; config: ClientConfigRef; serverName: string;
-             dl: Deadline = never) {.passive, raises.} =
-  ## Run the client handshake on a connected `Conn` and verify the server
-  ## against `serverName`. `dl` bounds the handshake.
+proc trySecure*(connection: var netconn.Conn; config: ClientConfigRef; serverName: string;
+                dl: Deadline = never): int {.passive.} =
+  ## The client handshake with the failure as a code: 0, or a negative zal
+  ## error. For callers that cannot raise, such as a server's accept hook.
+  ## A failure closes the connection.
   let s = Secured()
   s.client = config
   var fd = releaseDescriptor(connection)
   var tcp = default(rawtcp.TcpStream)
-  if not adoptTcp(addr tcp, fd, 0): raise BadOperation
+  if not adoptTcp(addr tcp, fd, 0): return neterrors.ResourceClosed
   let code = takeClient(addr s.stream, addr tcp, unsafeBorrowConfig(config), serverName,
                         budget(connection, dl), tok = cancelToken(connection))
-  finish(s, connection, code)
+  result = finish(s, connection, code)
 
-proc secure*(connection: var netconn.Conn; config: ServerConfigRef; dl: Deadline = never) {.passive, raises.} =
-  ## Run the server handshake on an accepted `Conn`.
+proc trySecure*(connection: var netconn.Conn; config: ServerConfigRef;
+                dl: Deadline = never): int {.passive.} =
+  ## The server handshake with the failure as a code.
   let s = Secured()
   s.server = config
   var fd = releaseDescriptor(connection)
   var tcp = default(rawtcp.TcpStream)
-  if not adoptTcp(addr tcp, fd, 0): raise BadOperation
+  if not adoptTcp(addr tcp, fd, 0): return neterrors.ResourceClosed
   let code = acceptTls(addr s.stream, addr tcp, unsafeBorrowConfig(config),
                        budget(connection, dl), tok = cancelToken(connection))
-  finish(s, connection, code)
+  result = finish(s, connection, code)
+
+proc secure*(connection: var netconn.Conn; config: ClientConfigRef; serverName: string;
+             dl: Deadline = never) {.passive, raises.} =
+  ## Run the client handshake on a connected `Conn` and verify the server
+  ## against `serverName`. `dl` bounds the handshake. A failure raises and
+  ## leaves the connection closed.
+  let code = trySecure(connection, config, serverName, dl)
+  checkTls(code)
+  if code != 0: raise ProtocolError
+
+proc secure*(connection: var netconn.Conn; config: ServerConfigRef; dl: Deadline = never) {.passive, raises.} =
+  ## Run the server handshake on an accepted `Conn`.
+  let code = trySecure(connection, config, dl)
+  checkTls(code)
+  if code != 0: raise ProtocolError
